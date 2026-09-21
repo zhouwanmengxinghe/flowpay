@@ -1,0 +1,34 @@
+# 统一维护本地服务连接；工作流通过 --workflow rag/live/demo 选择。
+data_dir = "../../var/live"
+# 默认指向仓库同级解包的数据集；通常由 FLOWPAY_DATASET_ROOT 覆盖。
+dataset_path = "../../dataset/data"
+# s0 已发布的业务知识快照，s1 从这里开始检索。
+knowledge_collection_id = "flowpay_docs_v1_qwen3_06b"
+# s4 的业务工具按这份策略访问 dataset；只读、按操作名登记、表列白名单。
+sources_config = "../policies/sources.toml"
+host = "127.0.0.1"
+port = 8000
+
+# 聊天模型。任何 OpenAI 兼容服务都可以，地址、模型名和密钥都能在 .env 里覆盖：
+# FLOWPAY_MODEL_BASE_URL、FLOWPAY_MODEL_NAME、FLOWPAY_MODEL_API_KEY。
+[model]
+provider = "openai-compatible"
+name = "deepseek-v4-flash"
+base_url = "https://api.deepseek.com"
+api_key_env = "FLOWPAY_MODEL_API_KEY"
+timeout_seconds = 60
+
+[model.request_options]
+max_tokens = 4096
+thinking = { type = "disabled" }
+
+# 本地嵌入模型；revision 固定本次下载的 digest。
+[embedding]
+provider = "openai-compatible"
+name = "qwen3-embedding:0.6b"
+base_url = "http://127.0.0.1:11434/v1"
+dimensions = 1024
+api_key_env = "OLLAMA_API_KEY"
+revision = "ac6da0dfba84a81fdbfbaf330198c33cd77c4cdfc53e8bc50eb581914a15621d"
+batch_size = 8
+timeout_seconds = 120

@@ -1,0 +1,127 @@
+# Application-owned access policy; core does not know FlowPay tables or fields.
+release_id = "flowpay-dataset-v1"
+manifest = "generated/canonical/manifest.json"
+manifest_sha256 = "3d4c8ab8fc6f04082b4e9ce1e02ae6a3dbf5433c4378dc135cea0331d96200ca"
+
+# 登记的是关系而不是某一条查询：调用方从 filters 里挑条件组合，因此新增一种问法
+# 不需要新增登记项。scope 每次必须给全，账户与环境隔离由 SQL 保证，不靠提示词。
+
+[sql.payments]
+path = "flowpay.sqlite"
+relation = "payments"
+select = ["payment_id", "amount", "currency", "status", "failure_code", "created_by_request_id", "created_at"]
+order_by = "created_at, payment_id"
+max_rows = 100
+timeout_seconds = 2
+[sql.payments.scope]
+account_id = "account_id"
+environment = "environment"
+[sql.payments.filters]
+payment_id = "payment_id"
+status = "status"
+created_by_request_id = "created_by_request_id"
+customer_id = "customer_id"
+[sql.payments.values]
+environment = ["production", "sandbox"]
+status = ["requires_action", "processing", "succeeded", "failed"]
+[sql.payments.columns]
+payments = ["payment_id", "amount", "currency", "status", "failure_code", "created_by_request_id", "created_at", "account_id", "environment", "customer_id"]
+
+[sql.events]
+path = "flowpay.sqlite"
+relation = "events"
+select = ["event_id", "event_type", "object_type", "object_id", "occurred_at", "caused_by_request_id"]
+order_by = "occurred_at, event_id"
+max_rows = 100
+timeout_seconds = 2
+[sql.events.scope]
+account_id = "account_id"
+environment = "environment"
+[sql.events.filters]
+event_id = "event_id"
+object_id = "object_id"
+event_type = "event_type"
+caused_by_request_id = "caused_by_request_id"
+[sql.events.values]
+environment = ["production", "sandbox"]
+[sql.events.columns]
+events = ["event_id", "event_type", "object_type", "object_id", "occurred_at", "caused_by_request_id", "account_id", "environment"]
+
+# 投递表没有账户与环境列；关系里连上 events，隔离条件才有列可落。
+[sql.webhook_deliveries]
+path = "flowpay.sqlite"
+relation = "webhook_deliveries d JOIN events e ON e.event_id = d.event_id"
+select = ["d.delivery_id", "d.event_id", "d.endpoint_id", "d.status", "d.attempt_count", "d.first_attempt_at", "d.last_attempt_at", "d.next_attempt_at", "d.delivered_at", "d.terminal_reason"]
+order_by = "d.delivery_id"
+max_rows = 100
+timeout_seconds = 2
+[sql.webhook_deliveries.scope]
+account_id = "e.account_id"
+environment = "e.environment"
+[sql.webhook_deliveries.filters]
+event_id = "d.event_id"
+delivery_id = "d.delivery_id"
+endpoint_id = "d.endpoint_id"
+status = "d.status"
+[sql.webhook_deliveries.values]
+environment = ["production", "sandbox"]
+status = ["pending", "retrying", "delivered", "exhausted", "canceled"]
+[sql.webhook_deliveries.columns]
+webhook_deliveries = ["delivery_id", "event_id", "endpoint_id", "status", "attempt_count", "first_attempt_at", "last_attempt_at", "next_attempt_at", "delivered_at", "terminal_reason"]
+events = ["event_id", "account_id", "environment"]
+
+[sql.webhook_endpoints]
+path = "flowpay.sqlite"
+relation = "webhook_endpoints"
+select = ["endpoint_id", "url_host", "status", "api_version", "secret_version", "retry_policy_id", "created_at", "disabled_at"]
+order_by = "endpoint_id"
+max_rows = 100
+timeout_seconds = 2
+[sql.webhook_endpoints.scope]
+account_id = "account_id"
+environment = "environment"
+[sql.webhook_endpoints.filters]
+endpoint_id = "endpoint_id"
+status = "status"
+[sql.webhook_endpoints.values]
+environment = ["production", "sandbox"]
+status = ["enabled", "disabled", "restricted"]
+[sql.webhook_endpoints.columns]
+webhook_endpoints = ["endpoint_id", "url_host", "status", "api_version", "secret_version", "retry_policy_id", "created_at", "disabled_at", "account_id", "environment"]
+
+[logs.api_requests]
+path = "runtime/api_requests.jsonl"
+format = "jsonl"
+time_field = "started_at"
+filter_fields = ["account_id", "environment", "request_id", "http_status", "service"]
+result_fields = ["account_id", "environment", "request_id", "started_at", "completed_at", "http_status", "error_code", "service", "region", "method", "route", "response_object_id", "response_object_type", "evidence_id"]
+max_rows = 100
+[logs.api_requests.values]
+environment = ["production", "sandbox"]
+service = ["api", "payments", "webhooks"]
+
+[logs.usage_buckets]
+path = "runtime/usage_buckets.jsonl"
+format = "jsonl"
+time_field = "bucket_start"
+filter_fields = ["account_id", "environment"]
+result_fields = ["account_id", "environment", "bucket_start", "bucket_width_seconds", "request_count", "success_count", "error_count", "rate_limited_count", "burst_peak_10s", "plan_effective_at_bucket", "evidence_id"]
+
+[logs.delivery_attempts]
+path = "runtime/webhook_delivery_attempts.jsonl"
+format = "jsonl"
+time_field = "attempted_at"
+filter_fields = ["delivery_id", "endpoint_id", "event_id"]
+result_fields = ["attempt_id", "attempt_number", "delivery_id", "endpoint_id", "event_id", "attempted_at", "http_status", "error_code", "latency_ms", "next_retry_at", "response_kind", "resulting_delivery_status", "evidence_id"]
+
+[logs.service_incidents]
+path = "runtime/service_incidents.jsonl"
+format = "jsonl"
+time_field = "started_at"
+filter_fields = ["incident_id", "region", "service", "status"]
+result_fields = ["incident_id", "region", "service", "status", "started_at", "identified_at", "resolved_at", "affected_error_codes", "impact", "timeline", "evidence_id"]
+# 取值来自产品定义：区域是业务分区（不是云厂商可用区），服务是平台组件名。
+[logs.service_incidents.values]
+region = ["NA", "EU", "APAC"]
+service = ["api", "payments", "webhooks"]
+status = ["active", "resolved"]

@@ -1,0 +1,195 @@
+/* 全局主题、布局和响应式样式；桌面三栏与窄屏切换共用同一套组件。 */
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: #ffffff;
+  --foreground: #263248;
+  --card: #ffffff;
+  --card-foreground: #263248;
+  --popover: #ffffff;
+  --popover-foreground: #263248;
+  --primary: #3364e7;
+  --primary-foreground: #ffffff;
+  --secondary: #eef2f7;
+  --secondary-foreground: #42546d;
+  --muted: #f6f7f9;
+  --muted-foreground: #748197;
+  --accent: #eaf0fa;
+  --accent-foreground: #334e78;
+  --destructive: #ba514c;
+  --border: #e3e8ef;
+  --input: #dce3ed;
+  --ring: #7c9ce8;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply m-0 bg-background font-sans text-foreground antialiased;
+  }
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']) {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+}
+
+@layer utilities {
+  .thin-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .code-block {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+    @apply min-w-0 overflow-auto whitespace-pre-wrap break-all rounded-md border bg-muted/60 p-3 font-mono text-[11px] leading-relaxed;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.markdown-content {
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+}
+.markdown-content > :first-child {
+  margin-top: 0;
+}
+.markdown-content p {
+  margin: 0.65em 0;
+}
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4 {
+  font-weight: 600;
+  line-height: 1.6;
+  margin: 1.3em 0 0.5em;
+}
+.markdown-content h1 {
+  font-size: 1.35em;
+}
+.markdown-content h2 {
+  font-size: 1.2em;
+}
+.markdown-content h3 {
+  font-size: 1.08em;
+}
+.markdown-content ul,
+.markdown-content ol {
+  padding-left: 1.5em;
+  margin: 0.6em 0;
+}
+.markdown-content ul {
+  list-style: disc;
+}
+.markdown-content ol {
+  list-style: decimal;
+}
+.markdown-content li {
+  margin: 0.25em 0;
+}
+.markdown-content li > p {
+  margin: 0;
+}
+.markdown-content blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 1em;
+  margin: 1em 0;
+  color: var(--muted-foreground);
+}
+.markdown-content a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.markdown-content :not(pre) > code {
+  font-size: 0.9em;
+  background: var(--muted);
+  border-radius: 4px;
+  padding: 0.15em 0.35em;
+}
+.markdown-content pre {
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.markdown-content table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+.markdown-content td,
+.markdown-content th {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+}
+.markdown-content th {
+  background: var(--muted);
+  font-weight: 600;
+}
+.markdown-content hr {
+  margin: 1.5em 0;
+}
+.markdown-content .hljs-keyword,
+.markdown-content .hljs-literal {
+  color: #8540a6;
+}
+.markdown-content .hljs-string,
+.markdown-content .hljs-regexp {
+  color: #16734b;
+}
+.markdown-content .hljs-attr,
+.markdown-content .hljs-title {
+  color: #2356a8;
+}
+.markdown-content .hljs-number,
+.markdown-content .hljs-built_in {
+  color: #a44b18;
+}
+.markdown-content .hljs-comment {
+  color: #758195;
+  font-style: italic;
+}

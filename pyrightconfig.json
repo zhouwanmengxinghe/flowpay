@@ -1,0 +1,35 @@
+{
+  "include": [
+    "backend/src",
+    "backend/tests",
+    "backend/migrations",
+    "scripts"
+  ],
+  "exclude": [
+    "**/.venv",
+    "**/__pycache__",
+    "**/node_modules",
+    "frontend/dist",
+    "var"
+  ],
+  "venvPath": "backend",
+  "venv": ".venv",
+  "pythonVersion": "3.12",
+  "executionEnvironments": [
+    {
+      "root": "backend",
+      "extraPaths": [
+        "backend/src",
+        "backend",
+        "."
+      ]
+    },
+    {
+      "root": ".",
+      "extraPaths": [
+        "backend/src"
+      ]
+    }
+  ],
+  "reportUnusedCallResult": "none"
+}
