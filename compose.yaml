@@ -1,7 +1,7 @@
 name: flowpay-teaching
 
-# 数据集不随仓库分发：解包 flowpay-dataset-v1.tar.gz 后，在 .env 里把
-# FLOWPAY_DATASET_ROOT 指向数据包或解出来的目录；make up 会解析成绝对路径再挂载。
+# 数据集不随仓库分发：在 .env 里把 FLOWPAY_DATASET_ROOT 指向数据集目录或 .tar.gz / .zip。
+# make up 会自动解开数据包，并解析成绝对目录路径再挂载。
 # 容器内统一挂在 /dataset，业务数据在 /dataset/data。
 
 services:

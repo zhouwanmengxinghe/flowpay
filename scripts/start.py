@@ -3,7 +3,7 @@
 只用标准库和 docker，因此不需要先建出 backend 虚拟环境。可以重复执行：
 .env 里已有的值不覆盖，数据库已迁移过不重跑，知识集合已就绪就跳过导入。
 
-数据集路径接受绝对路径、相对路径和 ~ 开头的路径，也接受还没解开的 .tar.gz。
+数据集路径接受绝对路径、相对路径和 ~ 开头的路径，也接受还没解开的 .tar.gz 或 .zip。
 解析出来的绝对路径通过子进程环境交给 compose（shell 环境优先于 .env），
 因此用户写在 .env 里的相对路径会原样保留。
 """
@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import zipfile
 from pathlib import Path
 
 if __package__ in {None, ""}:
@@ -69,21 +70,59 @@ def read_env() -> dict[str, str]:
     return values
 
 
+def open_zip(bundle: Path) -> zipfile.ZipFile:
+    """打开 ZIP；兼容未标注 UTF-8 的文件名，调用方负责用 with 关闭。"""
+    try:
+        return zipfile.ZipFile(bundle, metadata_encoding="utf-8")
+    except UnicodeDecodeError:
+        # 旧 ZIP 使用 CP437；UTF-8 解码失败时回到标准库的默认编码。
+        return zipfile.ZipFile(bundle)
+
+
 def unpack(bundle: Path) -> Path:
     """解开数据包到它所在的目录，返回解出来的那个目录；已解开过就直接复用。"""
-    with tarfile.open(bundle) as archive:
-        names = archive.getnames()
+    with (
+        open_zip(bundle) if bundle.suffix.lower() == ".zip" else tarfile.open(bundle)
+    ) as archive:
+        names = (
+            archive.namelist()
+            if isinstance(archive, zipfile.ZipFile)
+            else archive.getnames()
+        )
+        if isinstance(archive, zipfile.ZipFile):
+            # Finder 附带的资源分支和目录缓存不参与顶层目录判断，也不解压。
+            names = [
+                name
+                for name in names
+                if name.split("/")[0] != "__MACOSX" and Path(name).name != ".DS_Store"
+            ]
         top = {
             name.split("/")[0] for name in names if name and not name.startswith(".")
         }
         if len(top) != 1:
             raise SystemExit(f"数据包应当只有一个顶层目录，实际有：{sorted(top)}")
         target = bundle.parent / top.pop()
+        if isinstance(archive, zipfile.ZipFile):
+            # ZIP 没有 tar 的 data 过滤器，先检查全部成员，避免写到数据集目录之外。
+            root = target.resolve()
+            for name in names:
+                member = Path(name)
+                destination = (bundle.parent / member).resolve()
+                if (
+                    member.is_absolute()
+                    or ".." in member.parts
+                    or "\\" in name
+                    or not destination.is_relative_to(root)
+                ):
+                    raise SystemExit(f"ZIP 数据包包含不安全的路径：{name}")
         if target.exists():
             say(f"数据包已解开过，直接用 {target}")
             return target
         say(f"解开数据包到 {target}（约 160 MB，稍等）")
-        archive.extractall(bundle.parent, filter="data")
+        if isinstance(archive, zipfile.ZipFile):
+            archive.extractall(bundle.parent, members=names)
+        else:
+            archive.extractall(bundle.parent, filter="data")
     return target
 
 
@@ -91,7 +130,7 @@ def resolve_dataset(raw: str) -> Path:
     """把用户填的路径变成能交给 compose 的绝对路径。
 
     相对路径按仓库根目录解析，这样在项目里写 ../flowpay-dataset-v1 也能用。
-    指向 .tar.gz 时先解开，指向目录时直接校验布局。
+    指向 .tar.gz 或 .zip 时先解开，指向目录时直接校验布局。
     """
     path = Path(raw).expanduser()
     if not path.is_absolute():
@@ -99,9 +138,10 @@ def resolve_dataset(raw: str) -> Path:
     if not path.exists():
         raise SystemExit(f"{DATASET_KEY} 指向的位置不存在：{path}")
     if path.is_file():
-        if path.suffixes[-2:] != [".tar", ".gz"]:
+        suffixes = [suffix.lower() for suffix in path.suffixes]
+        if suffixes[-1:] != [".zip"] and suffixes[-2:] != [".tar", ".gz"]:
             raise SystemExit(
-                f"{DATASET_KEY} 要指向数据集目录或 .tar.gz，当前是：{path}"
+                f"{DATASET_KEY} 要指向数据集目录、.tar.gz 或 .zip，当前是：{path}"
             )
         path = unpack(path)
     missing = [part for part in LAYOUT if not (path / part).exists()]
