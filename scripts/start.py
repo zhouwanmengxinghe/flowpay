@@ -1,7 +1,8 @@
-"""一条命令把整套环境跑起来：校验 .env、准备数据库、导入知识库、起全栈。
+"""一条命令把整套环境跑起来：校验 .env、准备数据库、导入知识库、备好嵌入模型、起全栈。
 
 只用标准库和 docker，因此不需要先建出 backend 虚拟环境。可以重复执行：
-.env 里已有的值不覆盖，数据库已迁移过不重跑，知识集合已就绪就跳过导入。
+.env 里已有的值不覆盖，数据库已迁移过不重跑，知识集合已就绪就跳过导入，
+嵌入模型留在 docker 卷里，只有首次启动才下载。
 
 数据集路径接受绝对路径、相对路径和 ~ 开头的路径，也接受还没解开的 .tar.gz 或 .zip。
 解析出来的绝对路径通过子进程环境交给 compose（shell 环境优先于 .env），
@@ -19,6 +20,8 @@ import tarfile
 import zipfile
 from pathlib import Path
 
+import tomllib
+
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -32,13 +35,13 @@ KNOWLEDGE_DUMP = "postgres/flowpay_knowledge.dump"
 LAYOUT = ("data/knowledge", "benchmark/design")
 DATASET_KEY = "FLOWPAY_DATASET_ROOT"
 MODEL_KEY = "FLOWPAY_MODEL_API_KEY"
+CONFIG = "backend/configs/local.toml"
 
 
 class Arguments(argparse.Namespace):
-    """命令行参数；默认起全栈，可选只做准备。"""
+    """命令行参数；默认起全栈，可选强制重建镜像。"""
 
     build: bool = False
-    ollama: bool = False
 
 
 def say(message: str) -> None:
@@ -49,6 +52,62 @@ def say(message: str) -> None:
 def compose(*args: str, env: dict[str, str] | None = None) -> None:
     """在仓库根目录执行 docker compose；失败直接抛出。"""
     subprocess.run(["docker", "compose", *args], cwd=ROOT, check=True, env=env)
+
+
+def capture(*args: str, env: dict[str, str] | None = None) -> str:
+    """执行 docker compose 并取回标准输出；失败返回空串，由调用方判断缺什么。"""
+    result = subprocess.run(
+        ["docker", "compose", *args],
+        cwd=ROOT,
+        check=False,
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+    return result.stdout if result.returncode == 0 else ""
+
+
+def embedding_model() -> tuple[str, str]:
+    """从 local.toml 读出嵌入模型标签和钉死的 digest；配置只维护在那一处。"""
+    with (ROOT / CONFIG).open("rb") as handle:
+        embedding = tomllib.load(handle)["embedding"]
+    return str(embedding["name"]), str(embedding["revision"])
+
+
+def installed_digest(name: str, env: dict[str, str]) -> str | None:
+    """从 ollama list 里取该标签的短 digest；未安装返回 None。"""
+    listing = capture("exec", "-T", "ollama", "ollama", "list", env=env)
+    # 首行是表头，其余每行形如：NAME  ID  SIZE  MODIFIED。
+    for line in listing.splitlines()[1:]:
+        columns = line.split()
+        if len(columns) >= 2 and columns[0] == name:
+            return columns[1]
+    return None
+
+
+def prepare_embedding(env: dict[str, str]) -> None:
+    """起嵌入服务并确保模型就位；模型留在 flowpay_ollama 卷里，只下载一次。
+
+    数据包只带文档向量，提问时还要把问题本身嵌成向量，因此这个服务是必需的。
+    拉完核对 digest：库里那 712 个向量是这个 digest 算出来的，上游改了同名标签
+    就必须在提问之前失败，否则检索会悄悄退化成噪声，比直接报错难查得多。
+    """
+    name, revision = embedding_model()
+    say("启动嵌入服务 Ollama")
+    compose("up", "-d", "--wait", "ollama", env=env)
+    if installed_digest(name, env) is None:
+        say(f"下载嵌入模型 {name}（约 640 MB，只有首次启动需要）")
+    compose("run", "--rm", "--no-deps", "ollama-init", env=env)
+    digest = installed_digest(name, env)
+    if digest is None:
+        raise SystemExit(f"嵌入模型 {name} 未安装成功；请检查网络后重新执行。")
+    if not revision.startswith(digest):
+        mismatch = (
+            f"嵌入模型 {name} 的 digest 是 {digest}，与 {CONFIG} 的 revision 不符。"
+        )
+        # 同名标签被上游更新过。换了模型就换了向量空间，和数据包里的向量不能混用。
+        raise SystemExit(f"{mismatch}数据包里的向量属于原模型，请勿用新模型继续检索。")
+    say(f"嵌入模型就绪：{name}（{digest}）")
 
 
 def read_env() -> dict[str, str]:
@@ -153,28 +212,20 @@ def resolve_dataset(raw: str) -> Path:
 def knowledge_ready(env: dict[str, str]) -> bool:
     """知识集合是否已就绪；库还没建起来时也算未就绪。"""
     query = f"select 1 from collections where collection_id='{COLLECTION}' and status='ready'"
-    result = subprocess.run(
-        [
-            "docker",
-            "compose",
-            "exec",
-            "-T",
-            "postgres",
-            "psql",
-            "-U",
-            "flowpay_admin",
-            "-d",
-            "flowpay_knowledge",
-            "-tAc",
-            query,
-        ],
-        cwd=ROOT,
-        check=False,
-        text=True,
-        capture_output=True,
+    output = capture(
+        "exec",
+        "-T",
+        "postgres",
+        "psql",
+        "-U",
+        "flowpay_admin",
+        "-d",
+        "flowpay_knowledge",
+        "-tAc",
+        query,
         env=env,
     )
-    return result.returncode == 0 and result.stdout.strip() == "1"
+    return output.strip() == "1"
 
 
 def load_knowledge(dump: Path, env: dict[str, str]) -> None:
@@ -227,7 +278,6 @@ def main() -> None:
     """校验配置、准备数据、起全栈；每一步都可以单独重跑。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build", action="store_true", help="强制重新构建镜像")
-    parser.add_argument("--ollama", action="store_true", help="同时启动容器内嵌入服务")
     args = parser.parse_args(namespace=Arguments())
     values = read_env()
     dataset = resolve_dataset(values[DATASET_KEY])
@@ -241,10 +291,10 @@ def main() -> None:
             say("知识集合已就绪，跳过导入")
         else:
             load_knowledge(dataset / KNOWLEDGE_DUMP, env)
+        prepare_embedding(env)
         say("启动后端与前端")
-        profile = ["--profile", "ollama"] if args.ollama else []
         build = ["--build"] if args.build else []
-        compose(*profile, "up", "-d", *build, env=env)
+        compose("up", "-d", *build, env=env)
     except subprocess.CalledProcessError as error:
         parts: list[str] = [str(part) for part in list(error.cmd)]  # pyright: ignore[reportAny]
         raise SystemExit(f"命令失败：{' '.join(parts)}") from None

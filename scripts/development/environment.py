@@ -215,8 +215,12 @@ def perform(operation: str) -> None:
                 print("✓ 前端依赖与锁文件匹配，跳过安装")
             marker.write_text(json.dumps(dependency_hashes(), sort_keys=True))
             if not args.external_db:
+                # 只点名 postgres：宿主机直跑用宿主机的 Ollama，不需要容器里那套嵌入服务，
+                # 后端和前端也由 make run / make frontend 直接起。
                 execute(
-                    ["docker", "compose", "up", "-d", "--wait"], env, "启动 PostgreSQL"
+                    ["docker", "compose", "up", "-d", "--wait", "postgres"],
+                    env,
+                    "启动 PostgreSQL",
                 )
             execute(
                 [

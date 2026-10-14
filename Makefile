@@ -41,11 +41,11 @@ help: ## 列出可用目标
 
 ##@ 教程路径
 
-up: ## 起全栈：校验 .env、备好数据库与知识库，再起 postgres + backend + frontend
-	$(PYTHON) scripts/start.py $(if $(OLLAMA),--ollama) $(if $(BUILD),--build)
+up: ## 起全栈：校验 .env、备好数据库、知识库与嵌入模型，再起全部容器
+	$(PYTHON) scripts/start.py $(if $(BUILD),--build)
 
-down: ## 停止全栈容器，数据卷保留
-	docker compose --profile ollama down
+down: ## 停止全栈容器，数据卷保留（知识库与嵌入模型不会丢）
+	docker compose down
 
 logs: ## 跟踪后端与前端日志
 	docker compose logs -f backend frontend
