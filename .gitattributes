@@ -1,0 +1,2 @@
+/deploy.sh text eol=lf
+/infra/deploy/*.sh text eol=lf

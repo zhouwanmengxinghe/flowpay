@@ -1,0 +1,16 @@
+# Deploy image context only; keep legacy build behavior unchanged.
+.git
+.env
+.env.*
+**/.env
+**/.env.*
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/node_modules
+**/target
+**/dist
+var
+dataset
+docs
+AGENTS.md

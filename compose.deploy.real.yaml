@@ -1,0 +1,122 @@
+x-agent-build: &agent-build
+  context: .
+  dockerfile: infra/deploy/Agent.Dockerfile
+  args:
+    HTTP_PROXY: ${DEPLOY_HTTP_PROXY:-}
+    HTTPS_PROXY: ${DEPLOY_HTTPS_PROXY:-}
+    NO_PROXY: localhost,127.0.0.1,::1
+x-model-env: &model-env
+  FLOWPAY_MODEL_API_KEY: ${FLOWPAY_MODEL_API_KEY:?Fill FLOWPAY_MODEL_API_KEY in .env.deploy}
+  FLOWPAY_MODEL_PROVIDER: ${FLOWPAY_MODEL_PROVIDER:-anthropic-compatible}
+  FLOWPAY_MODEL_BASE_URL: ${FLOWPAY_MODEL_BASE_URL:-https://api.deepseek.com/anthropic}
+  FLOWPAY_MODEL_NAME: ${FLOWPAY_MODEL_NAME:-deepseek-flash}
+  FLOWPAY_MODEL_REQUEST_OPTIONS: ${FLOWPAY_MODEL_REQUEST_OPTIONS:-}
+  FLOWPAY_CONFIG: /app/backend/configs/local.toml
+  FLOWPAY_DATASET_ROOT: /dataset
+  FLOWPAY_DATASET_PATH: /dataset/data
+  FLOWPAY_EMBEDDING_BASE_URL: http://ollama:11434/v1
+  OLLAMA_API_KEY: ollama
+  HTTP_PROXY: ${DEPLOY_HTTP_PROXY:-}
+  HTTPS_PROXY: ${DEPLOY_HTTPS_PROXY:-}
+  NO_PROXY: localhost,127.0.0.1,::1,knowledge,ollama,db,redis,agent
+services:
+  knowledge:
+    image: pgvector/pgvector:0.8.2-pg17
+    restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 512m
+    environment:
+      POSTGRES_USER: flowpay_admin
+      POSTGRES_DB: flowpay_knowledge
+      POSTGRES_PASSWORD: ${SUPPORT_DB_PASSWORD}
+    volumes:
+      - knowledge_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01-vector.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowpay_admin -d flowpay_knowledge"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  ollama:
+    image: ollama/ollama:0.12.3
+    restart: unless-stopped
+    cpus: 2.0
+    mem_limit: 2g
+    environment:
+      HTTP_PROXY: ${DEPLOY_HTTP_PROXY:-}
+      HTTPS_PROXY: ${DEPLOY_HTTPS_PROXY:-}
+      NO_PROXY: localhost,127.0.0.1,::1
+      OLLAMA_NUM_PARALLEL: "1"
+    volumes:
+      - embedding_models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "OLLAMA_HOST=http://127.0.0.1:11434 ollama list >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  dataset-init:
+    image: flowpay-deploy-agent:local
+    build: *agent-build
+    user: "0:0"
+    environment: *model-env
+    command: ["python", "scripts/deploy/initialize.py", "dataset"]
+    volumes:
+      - ${FLOWPAY_DATASET_ROOT:?Set unpacked dataset directory in .env.deploy}:/dataset
+  knowledge-migrate:
+    image: flowpay-deploy-agent:local
+    build: *agent-build
+    environment:
+      FLOWPAY_KNOWLEDGE_ADMIN_DSN: postgresql://flowpay_admin:${SUPPORT_DB_PASSWORD}@knowledge:5432/flowpay_knowledge
+      FLOWPAY_DB_PASSWORD: ${SUPPORT_DB_PASSWORD}
+    command: ["python", "scripts/database.py", "setup"]
+    depends_on:
+      knowledge:
+        condition: service_healthy
+      dataset-init:
+        condition: service_completed_successfully
+  knowledge-restore:
+    image: pgvector/pgvector:0.8.2-pg17
+    environment:
+      PGHOST: knowledge
+      PGUSER: flowpay_admin
+      PGDATABASE: flowpay_knowledge
+      PGPASSWORD: ${SUPPORT_DB_PASSWORD}
+    volumes:
+      - ${FLOWPAY_DATASET_ROOT}:/dataset:ro
+    entrypoint: ["bash", "-euo", "pipefail", "/restore.sh"]
+    command: []
+    configs:
+      - source: restore-script
+        target: /restore.sh
+    depends_on:
+      knowledge-migrate:
+        condition: service_completed_successfully
+  embedding-init:
+    image: flowpay-deploy-agent:local
+    build: *agent-build
+    environment: *model-env
+    command: ["python", "scripts/deploy/initialize.py", "embedding"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+  agent:
+    environment:
+      <<: *model-env
+      SUPPORT_AGENT_MODE: real
+      FLOWPAY_RETRIEVAL_MODE: ${FLOWPAY_RETRIEVAL_MODE:-hybrid-document}
+      FLOWPAY_KNOWLEDGE_DSN: postgresql://flowpay_knowledge_reader:${SUPPORT_DB_PASSWORD}@knowledge:5432/flowpay_knowledge
+    volumes:
+      - ${FLOWPAY_DATASET_ROOT}:/dataset:ro
+    depends_on:
+      dataset-init:
+        condition: service_completed_successfully
+      knowledge-restore:
+        condition: service_completed_successfully
+      embedding-init:
+        condition: service_completed_successfully
+volumes:
+  knowledge_data:
+  embedding_models:
+configs:
+  restore-script:
+    file: ./infra/deploy/restore.sh

@@ -1,0 +1,97 @@
+# 独立部署栈：不读取 .env.support，不依赖宿主机 JDK/Maven/Python/uv。
+name: flowpay-deploy
+services:
+  db:
+    image: pgvector/pgvector:0.8.2-pg17
+    restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 512m
+    environment:
+      POSTGRES_USER: support
+      POSTGRES_DB: support
+      POSTGRES_PASSWORD: ${SUPPORT_DB_PASSWORD:?Run deploy.ps1 or deploy.sh first}
+    volumes:
+      - business_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U support -d support"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    cpus: 0.5
+    mem_limit: 128m
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "64mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+  agent:
+    image: flowpay-deploy-agent:local
+    build:
+      context: .
+      dockerfile: infra/deploy/Agent.Dockerfile
+      args:
+        HTTP_PROXY: ${DEPLOY_HTTP_PROXY:-}
+        HTTPS_PROXY: ${DEPLOY_HTTPS_PROXY:-}
+        NO_PROXY: localhost,127.0.0.1,::1
+    restart: unless-stopped
+    cpus: 2.0
+    mem_limit: 1g
+    environment:
+      SUPPORT_AGENT_MODE: mock
+      SUPPORT_AGENT_ENGINE: langchain
+      SUPPORT_AGENT_KEY: ${SUPPORT_AGENT_KEY:?Run deploy.ps1 or deploy.sh first}
+    volumes:
+      - agent_runtime:/app/runtime
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://127.0.0.1:8010/health', timeout=2).read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  api:
+    image: flowpay-deploy-api:local
+    build:
+      context: .
+      dockerfile: infra/deploy/Business.Dockerfile
+      args:
+        MAVEN_PROXY_HOST: ${MAVEN_PROXY_HOST:-}
+        MAVEN_PROXY_PORT: ${MAVEN_PROXY_PORT:-7890}
+    restart: unless-stopped
+    cpus: 2.0
+    mem_limit: 768m
+    environment:
+      SUPPORT_BIND: 0.0.0.0
+      SUPPORT_DB_URL: jdbc:postgresql://db:5432/support
+      SUPPORT_DB_USER: support
+      SUPPORT_DB_PASSWORD: ${SUPPORT_DB_PASSWORD:?Run deployment launcher first}
+      SUPPORT_REDIS_HOST: redis
+      SUPPORT_REDIS_PORT: 6379
+      SUPPORT_AGENT_URL: http://agent:8010
+      SUPPORT_AGENT_KEY: ${SUPPORT_AGENT_KEY:?Run deployment launcher first}
+      SUPPORT_DEMO: "true"
+      SUPPORT_DEMO_PASSWORD: ${SUPPORT_DEMO_PASSWORD:?Run deployment launcher first}
+      SUPPORT_ORIGIN: http://localhost:${DEPLOY_PORT:-8080}
+    ports:
+      - "127.0.0.1:${DEPLOY_PORT:-8080}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "java", "-XX:ActiveProcessorCount=1", "-Xmx48m", "-cp", "/app", "Healthcheck"]
+      interval: 10s
+      timeout: 8s
+      start_period: 40s
+      retries: 20
+volumes:
+  business_data:
+  redis_data:
+  agent_runtime:

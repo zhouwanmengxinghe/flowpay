@@ -1,0 +1,9 @@
+<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0">
+  <proxies>
+    <proxy>
+      <id>deployment-build</id><active>true</active><protocol>http</protocol>
+      <host>__PROXY_HOST__</host><port>__PROXY_PORT__</port>
+      <nonProxyHosts>localhost|127.0.0.1</nonProxyHosts>
+    </proxy>
+  </proxies>
+</settings>

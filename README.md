@@ -2,9 +2,73 @@
 
 面向支付平台商户接入与故障排查的多租户支持系统：**Java 管业务与执行状态，Python Agent 负责检索和调查**，将文档问答、业务核查、多轮追问与人工工单衔接起来。
 
-支持先运行不需要模型密钥的模拟演示，再接入真实模型和知识库。以下日常部署流程以 **Windows + PowerShell 7 + Docker Desktop（Linux 容器）**为准。
+支持先运行不需要模型密钥的模拟演示，再接入真实模型和知识库。新机器推荐使用下面的一键部署入口；后面的原开发流程以 **Windows + PowerShell 7 + Docker Desktop（Linux 容器）**为准。
 
-**部署现状：** 已实现 Docker Compose 服务编排和启动脚本；首次运行仍需准备依赖、构建项目镜像与 Java 包，真实模式还需单独准备数据包和嵌入模型。完成初始化后可用一条启动命令运行工作台，目前不支持在全新机器上仅执行 `docker compose up` 就完成全部部署。
+**一键部署：** 只需安装 Docker（含 Compose 插件、使用 Linux 容器），下载并解压本仓库后执行部署入口。Java 编译、Python 依赖安装、数据库迁移与服务健康检查均在容器内完成，不需要宿主机安装 JDK、Maven、Python、uv 或 PowerShell 7。首次需要联网下载镜像和依赖，耗时取决于网络；这不是离线安装包。真实调查仍需自己提供 API 密钥与配套数据包。
+
+## 新机器快速启动
+
+Windows：在仓库目录打开 PowerShell（系统自带版本即可），运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy.ps1
+```
+
+Linux / macOS：
+
+```sh
+sh deploy.sh
+```
+
+启动器自动创建独立的 `.env.deploy`，生成随机数据库口令、内部通信密钥及演示登录密码；重新执行不会覆盖这些配置和已有数据。等待显示 `FlowPay is ready` 后访问 **http://localhost:8080**（Linux/macOS 输出 `FlowPay ready`）。账号为 `merchant_a`、`merchant_b`、`support_a`、`support_b`，登录密码查看 `.env.deploy` 的 `SUPPORT_DEMO_PASSWORD`。
+
+默认启动四个长期运行容器：业务数据库、Redis、mock Agent、Java 业务后台及工作台。仅工作台端口映射到宿主机回环地址；不公开数据库与 Agent 内部接口。模拟演示不调用模型，真实检索与工具调查需切换下一节的 real 模式。
+
+已有 8080 服务时，先编辑 `.env.deploy` 的 `DEPLOY_PORT=28080` 再执行部署入口，地址相应变为 `http://localhost:28080`。该部署栈使用独立的数据卷，不复用原开发环境的账号、密码和会话数据；在同一个 localhost 下切换不同端口的工作台时，需要重新登录。
+
+### 切换真实 Agent
+
+首次模拟部署生成 `.env.deploy` 后，在该文件填写：
+
+```dotenv
+FLOWPAY_DATASET_ROOT='D:/datasets/flowpay-dataset-v1'
+FLOWPAY_MODEL_PROVIDER=anthropic-compatible
+FLOWPAY_MODEL_BASE_URL=https://api.deepseek.com/anthropic
+FLOWPAY_MODEL_NAME=deepseek-flash
+FLOWPAY_MODEL_API_KEY=填写你的密钥
+FLOWPAY_MODEL_REQUEST_OPTIONS='{"max_tokens":2048,"thinking":{"type":"disabled"}}'
+```
+
+数据包可从仓库根目录下载 [flowpay-dataset-v1.zip](./flowpay-dataset-v1.zip)，解压后将 `FLOWPAY_DATASET_ROOT` 指向解压目录（其中应直接包含 `data/`、`postgres/` 等目录）。Linux/macOS 使用该机器的实际绝对路径。随后 Windows 执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy.ps1 -Mode real
+```
+
+Linux/macOS 执行 `sh deploy.sh real`。流程会校验数据、按需生成业务快照、迁移和导入知识数据库、下载嵌入模型并核对 revision，全部成功后才启动真实 LangChain Agent。数据库导入失败会回滚；已有就绪集合与嵌入模型会复用。初始化不会发送聊天模型请求，在网页提交调查后才调用模型。
+
+### 部署网络、更新与停止
+
+新部署入口不绑定特定代理。需要代理时，在 `.env.deploy` 中填写容器可访问的地址，例如 Docker Desktop：
+
+```dotenv
+DEPLOY_HTTP_PROXY=http://host.docker.internal:7890
+DEPLOY_HTTPS_PROXY=http://host.docker.internal:7890
+MAVEN_PROXY_HOST=host.docker.internal
+MAVEN_PROXY_PORT=7890
+```
+
+这分别配置 Python 依赖/真实模型/嵌入模型下载，以及 Maven 依赖下载；拉取基础镜像仍使用 Docker 引擎自身的网络配置。容器中的 `127.0.0.1` 指容器自己；Linux 用户需填写容器能访问的代理主机地址，不能直接照抄宿主机回环地址。默认配置适用于可直连网络，脚本不会在代理失败后自动切换连接方式。
+
+更新代码后，重新执行相同部署命令，Docker 按变化重新构建并替换服务。部署栈运行镜像中的源码，不依赖宿主机源码挂载。停止并保留数据：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy.ps1 -Stop
+```
+
+Linux/macOS 执行 `sh deploy.sh stop`。不要删除 `.env.deploy` 或数据卷；重新生成密码不会自动更新已有数据库与账号。启动出错时可查看 `docker compose --env-file .env.deploy -f compose.deploy.yaml logs --tail 100`，修复后重试。该入口用于本机部署；公网提供服务还需配置域名、TLS 和实际账号策略。
+
+---
 
 ## 项目能力
 
@@ -54,9 +118,9 @@ cd flowpay
 
 后续命令均在这个仓库根目录运行。更新已有副本使用 `git pull`；如果是历史重写前克隆的旧副本，建议另外重新克隆，并先保存自己的本地改动。
 
-## 2. 准备运行环境
+## 2. 准备开发环境（原开发流程）
 
-首次准备需要：
+以下为原开发启动方式需要的工具；使用前面的一键部署入口可跳过本节：
 
 | 工具 | 用途 |
 |---|---|
@@ -405,36 +469,3 @@ infra/                       Dockerfile、PostgreSQL 初始化、Nginx
 scripts/business/            准备、启停、故障验证与评测脚本
 
 ```
-
-## 上游代码许可声明
-
-<a id="upstream-license"></a>
-
-<details>
-<summary>MIT 版权与许可声明（保留上游授权）</summary>
-
-```text
-MIT License
-
-Copyright (c) 2026 程序员Carl
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-</details>
