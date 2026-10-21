@@ -66,7 +66,11 @@ beforeEach(() => {
       let body: unknown = {}
       if (path === '/api/meta')
         body = {
-          workflow: { id: 'fixture', label: '测试工作流', description: '模拟数据' },
+          workflow: {
+            id: 'fixture',
+            label: '测试工作流',
+            description: '模拟数据',
+          },
           model: 'fixture-model',
           examples: ['没有收到通知'],
           reply_hint: '测试信息：acct_demo production req_demo_503',
@@ -102,6 +106,21 @@ async function mounted() {
 }
 
 describe('chat workspace interactions', () => {
+  it('accepts a new question in the same session after a failed run', async () => {
+    recorded.push(trace(2, 'run.started', { input: '原问题' }))
+    await mounted()
+    await act(async () => {
+      FakeEventSource.instances[0].push(trace(3, 'run.failed', { message: 'Expected a string' }))
+    })
+    expect(screen.getByRole('button', { name: '重试本轮' })).toBeTruthy()
+    const user = userEvent.setup()
+    await user.type(screen.getByRole('textbox', { name: '输入问题或补充信息' }), '新的问题')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+    expect(requests.find((request) => request.path.endsWith('/messages'))).toMatchObject({
+      path: '/api/sessions/session_test/messages',
+      body: { content: '新的问题' },
+    })
+  })
   it('submits a message and displays persisted SSE output', async () => {
     await mounted()
     const user = userEvent.setup()
@@ -115,7 +134,12 @@ describe('chat workspace interactions', () => {
       const stream = FakeEventSource.instances[0]
       stream.push(trace(2, 'message.user', { content: '支付通知没收到' }))
       stream.push(trace(3, 'run.started', { input: '支付通知没收到' }))
-      stream.push(trace(4, 'message.assistant', { content: '请提供请求编号', evidence: [] }))
+      stream.push(
+        trace(4, 'message.assistant', {
+          content: '请提供请求编号',
+          evidence: [],
+        }),
+      )
       stream.push(trace(5, 'run.finished', { status: 'waiting_user', state: {} }))
     })
     expect(
@@ -210,7 +234,10 @@ describe('chat workspace interactions', () => {
       trace(2, 'run.started', { input: 'first' }),
       trace(3, 'run.finished', { status: 'waiting_user', state: {} }),
       { ...trace(4, 'run.started', { input: 'second' }), run_id: 'run_second' },
-      { ...trace(5, 'run.finished', { status: 'completed', state: {} }), run_id: 'run_second' },
+      {
+        ...trace(5, 'run.finished', { status: 'completed', state: {} }),
+        run_id: 'run_second',
+      },
     )
     await mounted()
     const user = userEvent.setup()
@@ -257,7 +284,11 @@ describe('chat workspace interactions', () => {
       trace(
         5,
         'model.response',
-        { completion: { choices: [{ message: { role: 'assistant', content: '请补充编号' } }] } },
+        {
+          completion: {
+            choices: [{ message: { role: 'assistant', content: '请补充编号' } }],
+          },
+        },
         'model_1',
       ),
       trace(6, 'message.assistant', { content: '请补充编号' }),
@@ -278,7 +309,10 @@ describe('chat workspace interactions', () => {
   it('keeps the system prompt with the model call that sent it', async () => {
     const request = {
       request: {
-        body: { model: 'fixture', messages: [{ role: 'system', content: 'session rules' }] },
+        body: {
+          model: 'fixture',
+          messages: [{ role: 'system', content: 'session rules' }],
+        },
       },
     }
     recorded.push(
@@ -287,24 +321,36 @@ describe('chat workspace interactions', () => {
       trace(
         4,
         'model.response',
-        { completion: { choices: [{ message: { role: 'assistant', content: 'first answer' } }] } },
+        {
+          completion: {
+            choices: [{ message: { role: 'assistant', content: 'first answer' } }],
+          },
+        },
         'model_1',
       ),
       trace(5, 'run.finished', { status: 'waiting_user', state: {} }),
       { ...trace(6, 'run.started', { input: 'second' }), run_id: 'run_second' },
-      { ...trace(7, 'model.request', request, 'model_2'), run_id: 'run_second' },
+      {
+        ...trace(7, 'model.request', request, 'model_2'),
+        run_id: 'run_second',
+      },
       {
         ...trace(
           8,
           'model.response',
           {
-            completion: { choices: [{ message: { role: 'assistant', content: 'second answer' } }] },
+            completion: {
+              choices: [{ message: { role: 'assistant', content: 'second answer' } }],
+            },
           },
           'model_2',
         ),
         run_id: 'run_second',
       },
-      { ...trace(9, 'run.finished', { status: 'completed', state: {} }), run_id: 'run_second' },
+      {
+        ...trace(9, 'run.finished', { status: 'completed', state: {} }),
+        run_id: 'run_second',
+      },
     )
     await mounted()
     const panel = within(screen.getByRole('complementary', { name: '运行轨迹' }))
@@ -323,8 +369,18 @@ describe('chat workspace interactions', () => {
 describe('会话删除', () => {
   function deletionServer(fail = false) {
     let items = [
-      { id: 'session_test', title: '订单未通知', status: 'completed', updated_at: '2026-09-09' },
-      { id: 'session_other', title: '退款问题', status: 'idle', updated_at: '2026-09-09' },
+      {
+        id: 'session_test',
+        title: '订单未通知',
+        status: 'completed',
+        updated_at: '2026-09-09',
+      },
+      {
+        id: 'session_other',
+        title: '退款问题',
+        status: 'idle',
+        updated_at: '2026-09-09',
+      },
     ]
     const deletions: string[][] = []
     vi.mocked(fetch).mockImplementation(async (input, init) => {
@@ -358,7 +414,9 @@ describe('会话删除', () => {
     const deletions = deletionServer()
     render(<App />)
     const user = userEvent.setup()
-    const remove = await screen.findByRole('button', { name: '删除会话：订单未通知' })
+    const remove = await screen.findByRole('button', {
+      name: '删除会话：订单未通知',
+    })
     await user.click(remove)
     await user.click(screen.getByRole('button', { name: '取消' }))
     expect(deletions).toEqual([])

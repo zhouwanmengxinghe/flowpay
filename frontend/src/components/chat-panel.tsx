@@ -249,13 +249,16 @@ export function ChatPanel({
                   {textValue(terminalError?.payload.message) ||
                     '继续会从本轮开始重新执行，只读工具可能再次被调用。'}
                 </p>
+                <p>
+                  可以重试原问题，也可以直接发送新问题或补充信息。失败的输出不会保存为已完成的回答。
+                </p>
                 <Button
                   variant="outline"
                   size="sm"
                   disabled={pending}
                   onClick={() => actions.resumeRun()}
                 >
-                  继续本轮
+                  {status === 'failed' ? '重试本轮' : '继续本轮'}
                 </Button>
               </AlertDescription>
             </Alert>
@@ -287,13 +290,13 @@ export function ChatPanel({
             aria-label="输入问题或补充信息"
             placeholder={
               canContinue
-                ? '请先继续本轮，或新建会话'
+                ? '可直接发送新问题或补充信息…'
                 : status === 'waiting_user'
                   ? '补充助手需要的信息…'
                   : '描述问题，或提供你看到的报错…'
             }
             value={draft}
-            disabled={pending || canContinue || !meta}
+            disabled={pending || running || !meta}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -325,7 +328,7 @@ export function ChatPanel({
                 size="icon"
                 className="size-8"
                 aria-label="发送消息"
-                disabled={!draft.trim() || pending || canContinue || !meta}
+                disabled={!draft.trim() || pending || !meta}
               >
                 {pending ? (
                   <LoaderCircle className="size-4 animate-spin" />

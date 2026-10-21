@@ -12,7 +12,7 @@ import yaml
 from flowpay.core.json import parse_json, require_object, require_text, to_json_object
 from flowpay.core.knowledge import Chunk, Document
 
-from .models import MarkdownLocator
+from .models import MarkdownLocator, SplitterConfig
 
 
 def metadata_scalar(value: object) -> str:
@@ -77,10 +77,94 @@ def section_ranges(content: str, start: int) -> list[tuple[int, int, str]]:
     return sections
 
 
-def split_document(document: Document, body_start: int, max_chars: int) -> list[Chunk]:
-    """每块保留原始字符窗口和标题前缀；字符上限包含前缀，编号从 1 开始。"""
+def _preferred_cut(content: str, start: int, hard_end: int, floor: int) -> int:
+    """尽量在段落、行或句子边界切分；找不到合适边界时使用硬窗口。"""
+    candidates = [
+        content.rfind("\n\n", floor, hard_end),
+        content.rfind("\n", floor, hard_end),
+    ]
+    punctuation = max(
+        (content.rfind(mark, floor, hard_end) for mark in "。！？；.!?;"),
+        default=-1,
+    )
+    if punctuation >= 0:
+        candidates.append(punctuation + 1)
+    cut = max(candidates, default=-1)
+    if cut <= start:
+        cut = hard_end
+    if content[cut - 1 : cut] == "\n" and content[cut : cut + 1] == "\n":
+        cut += 1
+    # 尽量不切开完整代码围栏或 Markdown 表格；块本身超长时才退回硬窗口。
+    for block_start, block_end in _protected_blocks(content):
+        if block_start < cut < block_end:
+            if block_start >= floor:
+                return block_start
+            if block_end <= hard_end:
+                return block_end
+            return hard_end
+    return cut
+
+
+def _protected_blocks(content: str) -> list[tuple[int, int]]:
+    """返回可完整保留的 fenced code 与 Markdown table 原文范围。"""
+    lines = content.splitlines(keepends=True)
+    offsets: list[int] = []
+    offset = 0
+    for line in lines:
+        offsets.append(offset)
+        offset += len(line)
+    blocks: list[tuple[int, int]] = []
+    fence_start: int | None = None
+    fence_marker = ""
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        fence = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+        if fence:
+            marker = fence.group(1)
+            if fence_start is None:
+                fence_start, fence_marker = offsets[index], marker[0]
+            elif marker[0] == fence_marker and not line[fence.end() :].strip():
+                blocks.append((fence_start, offsets[index] + len(line)))
+                fence_start = None
+                fence_marker = ""
+            index += 1
+            continue
+        is_table = (
+            index + 1 < len(lines)
+            and "|" in line
+            and bool(re.match(r"^\s*\|?\s*:?-{3,}", lines[index + 1]))
+        )
+        if is_table:
+            end_index = index + 1
+            while end_index + 1 < len(lines) and "|" in lines[end_index + 1]:
+                end_index += 1
+            blocks.append((offsets[index], offsets[end_index] + len(lines[end_index])))
+            index = end_index + 1
+            continue
+        index += 1
+    if fence_start is not None:
+        blocks.append((fence_start, len(content)))
+    return blocks
+
+
+def split_document(
+    document: Document,
+    body_start: int,
+    max_chars: int | SplitterConfig,
+    overlap_chars: int = 0,
+    boundary_aware: bool = False,
+) -> list[Chunk]:
+    """按版本化参数切分 Markdown；保留来源偏移、标题路径和稳定片段摘要。"""
+    if isinstance(max_chars, SplitterConfig):
+        config = max_chars
+        max_chars = config.max_chunk_chars
+        overlap_chars = config.overlap_chars
+        boundary_aware = "structure" in config.name
     if max_chars < 128:
         raise ValueError("max_chunk_chars must be at least 128")
+    if overlap_chars < 0 or overlap_chars >= max_chars - 32:
+        raise ValueError("overlap_chars must be nonnegative and smaller than the chunk window")
     chunks: list[Chunk] = []
     for start, end, heading in section_ranges(document.content, body_start):
         section = document.content[start:end]
@@ -92,10 +176,20 @@ def split_document(document: Document, body_start: int, max_chars: int) -> list[
         window = max_chars - len(prefix)
         if window < 32:
             raise ValueError("Heading prefix leaves insufficient chunk space")
-        for position in range(start, end, window):
-            stop = min(position + window, end)
+        if overlap_chars >= window:
+            raise ValueError("overlap_chars must be smaller than the content window")
+        position = start
+        while position < end:
+            hard_end = min(position + window, end)
+            stop = (
+                _preferred_cut(document.content, position, hard_end, position + window // 2)
+                if boundary_aware and hard_end < end
+                else hard_end
+            )
             excerpt = document.content[position:stop]
+            next_position = stop if stop >= end else max(position + 1, stop - overlap_chars)
             if not excerpt.strip():
+                position = next_position
                 continue
             locator = MarkdownLocator(
                 heading=heading,
@@ -106,6 +200,7 @@ def split_document(document: Document, body_start: int, max_chars: int) -> list[
                 prefix=prefix,
             )
             chunks.append(Chunk(len(chunks) + 1, prefix + excerpt, to_json_object(locator)))
+            position = next_position
     if not chunks:
         raise ValueError(f"Document has no indexable body: {document.doc_id}")
     return chunks

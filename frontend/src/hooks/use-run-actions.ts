@@ -80,7 +80,7 @@ export function useRunActions(options: {
 
   async function submitMessage(content: string) {
     const text = content.trim()
-    if (!text || ['running', 'failed', 'interrupted', 'canceled'].includes(status)) return false
+    if (!text || status === 'running') return false
     return perform(async () => {
       let targetId = sessionId
       if (!targetId) {
@@ -88,7 +88,11 @@ export function useRunActions(options: {
         targetId = session.id
         selectSession(targetId)
       }
-      const id = requestId({ sessionId: targetId, operation: 'message', content: text })
+      const id = requestId({
+        sessionId: targetId,
+        operation: 'message',
+        content: text,
+      })
       await sessionApi.submitMessage(targetId, id, text)
       submission.current = null
       await refreshAfterAcceptance()

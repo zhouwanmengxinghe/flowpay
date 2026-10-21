@@ -1,0 +1,32 @@
+# 任务卡验收专用覆盖：独立 project name/volume，并使用不占日常栈的端口。
+services:
+  support-db:
+    ports: !override
+      - "127.0.0.1:25433:5432"
+  support-redis:
+    ports: !override
+      - "127.0.0.1:26379:6379"
+  support-cache:
+    ports: !override
+      - "127.0.0.1:26380:6379"
+  support-agent:
+    environment:
+      SUPPORT_AGENT_MODE: mock
+      SUPPORT_AGENT_ENGINE: langchain
+    ports: !override
+      - "127.0.0.1:28010:8010"
+  support-api-a:
+    environment:
+      SUPPORT_ORIGIN: http://localhost:28080
+      SUPPORT_RUN_LEASE_SECONDS: 15
+      SUPPORT_HEARTBEAT_SECONDS: 4
+      SUPPORT_RUN_DEADLINE_SECONDS: 45
+  support-api-b:
+    environment:
+      SUPPORT_ORIGIN: http://localhost:28080
+      SUPPORT_RUN_LEASE_SECONDS: 15
+      SUPPORT_HEARTBEAT_SECONDS: 4
+      SUPPORT_RUN_DEADLINE_SECONDS: 45
+  support-gateway:
+    ports: !override
+      - "127.0.0.1:28080:8080"

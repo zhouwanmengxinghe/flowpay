@@ -1,0 +1,32 @@
+# 可选：需要原教学 postgres/ollama 已就绪及真实模型密钥。与业务演示 Compose 一起使用。
+services:
+  support-agent:
+    environment:
+      SUPPORT_AGENT_MODE: real
+      SUPPORT_AGENT_ENGINE: ${SUPPORT_AGENT_ENGINE:-langchain}
+      HTTP_PROXY: http://host.docker.internal:7890
+      HTTPS_PROXY: http://host.docker.internal:7890
+      NO_PROXY: localhost,127.0.0.1,::1,postgres,ollama,support-db,support-redis,support-cache
+      SUPPORT_RETRIEVAL_CACHE_ENABLED: ${SUPPORT_RETRIEVAL_CACHE_ENABLED:-false}
+      SUPPORT_CACHE_REDIS_URL: redis://support-cache:6379/0
+      FLOWPAY_CONFIG: /app/backend/configs/local.toml
+      FLOWPAY_RETRIEVAL_MODE: ${FLOWPAY_RETRIEVAL_MODE:-hybrid-document}
+      FLOWPAY_DATASET_ROOT: /dataset
+      FLOWPAY_DATASET_PATH: /dataset/data
+      FLOWPAY_MODEL_API_KEY: ${FLOWPAY_MODEL_API_KEY:?Set FLOWPAY_MODEL_API_KEY}
+      FLOWPAY_MODEL_BASE_URL: ${FLOWPAY_MODEL_BASE_URL:-}
+      FLOWPAY_MODEL_NAME: ${FLOWPAY_MODEL_NAME:-}
+      FLOWPAY_MODEL_PROVIDER: ${FLOWPAY_MODEL_PROVIDER:-openai-compatible}
+      FLOWPAY_MODEL_REQUEST_OPTIONS: ${FLOWPAY_MODEL_REQUEST_OPTIONS:-}
+      FLOWPAY_EMBEDDING_BASE_URL: http://ollama:11434/v1
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-ollama}
+      FLOWPAY_KNOWLEDGE_DSN: postgresql://flowpay_knowledge_reader:${FLOWPAY_DB_PASSWORD:-flowpay_local}@postgres:5432/flowpay_knowledge
+    volumes:
+      - ${FLOWPAY_DATASET_ROOT}:/dataset:ro
+    networks:
+      - default
+      - teaching
+networks:
+  teaching:
+    external: true
+    name: flowpay-teaching_default

@@ -6,15 +6,17 @@ COPY --from=ghcr.io/astral-sh/uv:0.9.7 /uv /usr/local/bin/uv
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
+    UV_HTTP_TIMEOUT=120 \
     PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
 
-# 只复制锁文件装依赖：源码变化不会让这一层失效。
+# 只复制锁文件装运行依赖；检查器和测试工具留给开发环境，缓存供失败重试复用。
 COPY backend/pyproject.toml backend/uv.lock /app/backend/
-RUN uv sync --project /app/backend --frozen --no-install-project
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --project /app/backend --frozen --no-install-project --no-dev
 
 # 源码由 compose 挂载；这里只声明它在包路径上。
 ENV PYTHONPATH=/app/backend/src:/app

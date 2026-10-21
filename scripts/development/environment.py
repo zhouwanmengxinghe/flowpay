@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
 import hashlib
 import json
 import os
@@ -37,7 +36,7 @@ def read_env(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     if not path.exists():
         return values
-    for number, line in enumerate(path.read_text().splitlines(), 1):
+    for number, line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
@@ -262,6 +261,9 @@ def setup_lock(operation: str) -> Generator[None]:
     if operation != "setup":
         yield
         return
+    # 仅宿主机 setup 使用 Unix 锁；Docker 启动脚本读取配置不依赖此模块。
+    import fcntl
+
     directory = ROOT / "var/setup"
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / "setup.lock").open("a") as handle:

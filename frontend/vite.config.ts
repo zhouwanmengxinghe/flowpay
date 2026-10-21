@@ -14,7 +14,9 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: { '/api': api },
-    // 挂载卷在部分平台上收不到 inotify 事件，容器里改用轮询。
-    watch: process.env.FLOWPAY_POLL_WATCH ? { usePolling: true, interval: 300 } : undefined,
+    // Windows 挂载目录轮询会放大宿主机文件共享开销；仅显式设为 1 时启用。
+    watch: process.env.FLOWPAY_POLL_WATCH === '1'
+      ? { usePolling: true, interval: 300 }
+      : undefined,
   },
 })

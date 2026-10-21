@@ -1,0 +1,112 @@
+# 独立业务演示栈，不修改原教学数据库和端口。先构建 business/target 下的 jar。
+name: flowpay-support
+services:
+  support-redis:
+    image: redis:7.4-alpine
+    cpus: 0.5
+    mem_limit: 128m
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "64mb", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "127.0.0.1:16379:6379"
+    volumes:
+      - support_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+  support-cache:
+    image: redis:7.4-alpine
+    cpus: 0.25
+    mem_limit: 128m
+    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru", "--save", ""]
+    ports:
+      - "127.0.0.1:16380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+  support-rabbit:
+    profiles: ["mq"]
+    image: rabbitmq:4.1.8-alpine@sha256:33335c41151058d46086c04859e6b91bfdf97f9575efd3ca9709a20b5cd45aee
+    cpus: 0.5
+    mem_limit: 384m
+    environment:
+      RABBITMQ_DEFAULT_USER: ${SUPPORT_RABBIT_USER:-support}
+      RABBITMQ_DEFAULT_PASS: ${SUPPORT_RABBIT_PASSWORD:?Set SUPPORT_RABBIT_PASSWORD}
+    volumes:
+      - support_rabbit:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  support-db:
+    image: pgvector/pgvector:0.8.2-pg17
+    cpus: 1.0
+    mem_limit: 512m
+    environment:
+      POSTGRES_DB: support
+      POSTGRES_USER: support
+      POSTGRES_PASSWORD: ${SUPPORT_DB_PASSWORD:?Set SUPPORT_DB_PASSWORD}
+    ports:
+      - "127.0.0.1:15433:5432"
+    volumes:
+      - support_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U support -d support"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  support-agent:
+    image: flowpay-support-agent
+    build:
+      context: ./var/business
+      dockerfile: ../../infra/business/Agent.Dockerfile
+    cpus: 2.0
+    mem_limit: 1g
+    command: ["uvicorn", "--factory", "flowpay.business.app:app_factory", "--host", "0.0.0.0", "--port", "8010"]
+    environment:
+      SUPPORT_AGENT_KEY: ${SUPPORT_AGENT_KEY:?Set SUPPORT_AGENT_KEY}
+      SUPPORT_AGENT_MODE: ${SUPPORT_AGENT_MODE:-mock}
+      SUPPORT_AGENT_ENGINE: ${SUPPORT_AGENT_ENGINE:-langchain}
+      PYTHONPATH: /opt/business-deps:/app/backend/src
+    volumes:
+      - ./backend:/app/backend:ro
+    ports:
+      - "127.0.0.1:8010:8010"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=2).read()"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  support-api:
+    profiles: ["container"]
+    build:
+      context: .
+      dockerfile: infra/business/Dockerfile
+    cpus: 2.0
+    mem_limit: 768m
+    environment:
+      SUPPORT_DB_URL: jdbc:postgresql://support-db:5432/support
+      SUPPORT_REDIS_HOST: support-redis
+      SUPPORT_REDIS_PORT: 6379
+      SUPPORT_BIND: 0.0.0.0
+      SUPPORT_DB_PASSWORD: ${SUPPORT_DB_PASSWORD:?Set SUPPORT_DB_PASSWORD}
+      SUPPORT_AGENT_URL: http://support-agent:8010
+      SUPPORT_AGENT_KEY: ${SUPPORT_AGENT_KEY:?Set SUPPORT_AGENT_KEY}
+      SUPPORT_DEMO: "true"
+      SUPPORT_DEMO_PASSWORD: ${SUPPORT_DEMO_PASSWORD:?Set SUPPORT_DEMO_PASSWORD}
+      SUPPORT_ORIGIN: ${SUPPORT_ORIGIN:-http://localhost:8080}
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      support-db:
+        condition: service_healthy
+      support-agent:
+        condition: service_started
+volumes:
+  support_redis:
+  support_rabbit:
+  support_data:

@@ -2,5 +2,7 @@
 collection_id = "flowpay_docs_v1_qwen3_06b"
 release_manifest = "releases/flowpay_dataset_v1/release_manifest.json"
 release_manifest_sha256 = "2e50d09e8898ce0aa4eb3f02698ac0ef76484f9e9c90c4ffac318d12d3e77a5f"
-# 基础策略：按 Markdown 标题分节，长节按字符窗口拆分，不重叠。
+# 当前发布集合的基线策略；新实验可以调整三项并使用新的 collection_id。
 max_chunk_chars = 1000
+overlap_chars = 0
+boundary_aware = false

@@ -19,6 +19,50 @@ from flowpay.core.llm.chat.client import ChatClient
 from flowpay.core.llm.chat.openai_chat import OpenAiChatModel
 
 
+@pytest.mark.parametrize(
+    ("base_url", "hku_header"),
+    [
+        ("https://api.hku.hk/foundry/student/models", True),
+        ("https://api.deepseek.com", False),
+        ("https://api.hku.hk.example.com/models", False),
+    ],
+)
+async def test_subscription_header_is_only_sent_to_hku(
+    monkeypatch: pytest.MonkeyPatch, base_url: str, hku_header: bool
+) -> None:
+    monkeypatch.setenv("TEST_MODEL_KEY", "test-secret")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == base_url + "/chat/completions"
+        assert request.headers.get("api-key") == ("test-secret" if hku_header else None)
+        assert request.headers["authorization"] == "Bearer test-secret"
+        frame = {
+            "id": "fixture",
+            "created": 123,
+            "model": "fixture",
+            "choices": [{"index": 0, "delta": {"content": "OK"}, "finish_reason": "stop"}],
+        }
+        return httpx.Response(
+            200,
+            text=f"data: {json.dumps(frame)}\n\ndata: [DONE]\n\n",
+            headers={"content-type": "text/event-stream"},
+        )
+
+    adapter = OpenAiChatModel(
+        ModelSettings(name="fixture", base_url=base_url, api_key_env="TEST_MODEL_KEY"),
+        httpx.MockTransport(handler),
+    )
+    request = adapter.prepare([{"role": "user", "content": "Hi"}], [])
+    chunks: list[JsonObject] = []
+
+    async def emit(chunk: JsonObject) -> None:
+        chunks.append(chunk)
+
+    reply = await adapter.invoke(request, emit)
+    assert reply.choices[0].message.content == "OK"
+    assert "test-secret" not in json.dumps({"request": request, "chunks": chunks})
+
+
 async def test_wire_stream_and_tool_argument_fragments_are_preserved(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

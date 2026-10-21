@@ -50,6 +50,9 @@ class ChatStreamAccumulator:
     def _merge_message_delta(self, delta: JsonObject) -> None:
         """合并内容、角色与供应商扩展增量；工具片段按 index 分别累积。"""
         for field, value in delta.items():
+            # null 表示本帧没有该字段的增量，不能清空已有角色或当工具列表解析。
+            if value is None:
+                continue
             if field == "tool_calls":
                 for part in require_list(value):
                     self._merge_tool_call(require_object(part))
@@ -77,7 +80,12 @@ class ChatStreamAccumulator:
             tool_call["id"] = part["id"]
         # 参数 JSON 在流结束前可能不完整；此处只拼字符串，执行前再解码。
         function = require_object(tool_call["function"])
-        for field, text in require_object(part.get("function", {})).items():
+        delta = part.get("function")
+        if delta is None:
+            return
+        for field, text in require_object(delta).items():
+            if text is None:
+                continue
             function[field] = require_text(function.get(field, "")) + require_text(text)
 
     def finish(self) -> ChatCompletion:

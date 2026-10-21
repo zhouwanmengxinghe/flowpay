@@ -13,7 +13,7 @@ services:
       POSTGRES_PASSWORD: ${FLOWPAY_DB_PASSWORD:-flowpay_local}
       POSTGRES_DB: flowpay_knowledge
     ports:
-      - "127.0.0.1:55432:5432"
+      - "127.0.0.1:15432:5432"
     volumes:
       - flowpay_postgres:/var/lib/postgresql/data
       - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01-databases.sql:ro
@@ -43,9 +43,12 @@ services:
         fi
 
   backend:
+    cpus: 2.0
     build:
       context: .
       dockerfile: infra/backend/Dockerfile
+    # 默认用于运行和学习；禁用跨 Windows 挂载目录的高频源码扫描。
+    command: ["uvicorn", "--factory", "flowpay.cli:app_factory", "--host", "0.0.0.0", "--port", "8000"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -58,8 +61,9 @@ services:
       FLOWPAY_DATASET_ROOT: /dataset
       FLOWPAY_CONFIG: /app/backend/configs/local.toml
       FLOWPAY_HOST: 0.0.0.0
-      FLOWPAY_DATA_DIR: /app/var/live
+      FLOWPAY_DATA_DIR: /app/runtime
       FLOWPAY_WORKFLOW: ${STAGE:-s1}
+      FLOWPAY_RETRIEVAL_MODE: ${FLOWPAY_RETRIEVAL_MODE:-hybrid-document}
       # 默认用下面 compose 起的 ollama 服务；换成远端 Ollama 就在 .env 里覆盖这一项。
       # 端口必须是 11434：知识集合的向量是在该端口建的，换端口会被向量空间校验判为不兼容。
       FLOWPAY_EMBEDDING_BASE_URL: ${FLOWPAY_EMBEDDING_BASE_URL:-http://ollama:11434/v1}
@@ -68,7 +72,7 @@ services:
       FLOWPAY_MODEL_BASE_URL: ${FLOWPAY_MODEL_BASE_URL:-}
       FLOWPAY_MODEL_NAME: ${FLOWPAY_MODEL_NAME:-}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-ollama}
-      # 容器内走服务网络（postgres:5432），宿主机走发布出来的 127.0.0.1:55432。
+      # 容器内走服务网络（postgres:5432），宿主机走发布出来的 127.0.0.1:15432。
       # 角色名、库名和口令都是固定的，连接串在这里直接拼，不存进 .env。
       FLOWPAY_KNOWLEDGE_DSN: postgresql://flowpay_knowledge_reader:${FLOWPAY_DB_PASSWORD:-flowpay_local}@postgres:5432/flowpay_knowledge
       FLOWPAY_KNOWLEDGE_BUILDER_DSN: postgresql://flowpay_knowledge_builder:${FLOWPAY_DB_PASSWORD:-flowpay_local}@postgres:5432/flowpay_knowledge
@@ -79,6 +83,8 @@ services:
       - ./backend:/app/backend
       - ./scripts:/app/scripts
       - ./var:/app/var
+      # SQLite 的高频事务留在 Linux 数据卷，避免 Windows 目录挂载的同步 I/O 开销。
+      - flowpay_runtime:/app/runtime
       - ${FLOWPAY_DATASET_ROOT}:/dataset:ro
     ports:
       - "127.0.0.1:8000:8000"
@@ -86,6 +92,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   frontend:
+    cpus: 1.0
     build:
       context: .
       dockerfile: infra/frontend/Dockerfile
@@ -93,7 +100,7 @@ services:
       - backend
     environment:
       FLOWPAY_API_PROXY: http://backend:8000
-      FLOWPAY_POLL_WATCH: "1"
+      FLOWPAY_POLL_WATCH: ${FLOWPAY_POLL_WATCH:-0}
     volumes:
       - ./frontend/src:/app/frontend/src
       - ./frontend/public:/app/frontend/public
@@ -108,6 +115,7 @@ services:
   # 嵌入服务，必需：数据包只带文档向量，用户每次提问都要现场把问题嵌成向量。
   # 不对外发布 11434，避免和宿主机已经装着的 Ollama 抢端口；后端走服务网络访问。
   ollama:
+    cpus: 4.0
     image: ollama/ollama:0.12.3
     volumes:
       - flowpay_ollama:/root/.ollama
@@ -139,3 +147,4 @@ services:
 volumes:
   flowpay_postgres:
   flowpay_ollama:
+  flowpay_runtime:

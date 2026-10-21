@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>FlowPay 商户支持</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <section id="login" class="login card">
+      <p class="eyebrow">FLOWPAY SUPPORT</p>
+      <h1>商户技术支持</h1>
+      <p>排查支付与通知问题，用证据跟进每一次处理。</p>
+      <form id="login-form">
+        <label
+          >账号<input
+            name="username"
+            required
+            autocomplete="username"
+            placeholder="merchant_a / support_a"
+        /></label>
+        <label
+          >密码<input
+            name="password"
+            type="password"
+            required
+            autocomplete="current-password" /></label
+        ><button>登录工作台</button>
+      </form>
+      <p class="hint">
+        本地演示账号：merchant_a、merchant_b、support_a、support_b。密码由启动时的
+        SUPPORT_DEMO_PASSWORD 配置。演示业务记录为合成数据。
+      </p>
+    </section>
+    <div id="workspace" hidden>
+      <header>
+        <strong>FlowPay 商户支持</strong><span id="identity"></span
+        ><button id="logout" class="secondary">退出</button>
+      </header>
+      <div class="notice" id="agent-notice">
+        本版支持有授权范围的调查与工单闭环。模拟 Agent 的回答会标记“模拟验收”，不代表真实业务查询。
+      </div>
+      <nav>
+        <button id="tab-sessions">调查会话</button
+        ><button id="tab-tickets" class="secondary">技术工单</button>
+        <button id="tab-admin" class="secondary" hidden>管理与用量</button>
+      </nav>
+      <section id="administration" class="card" hidden>
+        <h2>成员与运行管理</h2>
+        <div id="member-controls" hidden>
+          <p>管理员可管理本商户成员；最后一名有效管理员不能被禁用或降级。</p>
+          <form id="member-form">
+            <label>新成员账号<input name="username" required pattern="[A-Za-z0-9_]{3,60}" autocomplete="off" /></label>
+            <label>初始密码<input name="password" type="password" required minlength="12" maxlength="72" autocomplete="new-password" /></label>
+            <label>成员角色<select name="administrator"><option value="false">普通成员</option><option value="true">商户管理员</option></select></label>
+            <button>创建成员</button>
+          </form>
+          <div id="member-list"></div>
+          <h3>调查配额（UTC 日界，按受理次数）</h3><pre id="usage"></pre>
+          <h3>管理审计</h3><pre id="admin-audit"></pre>
+        </div>
+        <div id="grant-controls" hidden>
+          <h3>技术支持授权</h3>
+          <form id="grant-form">
+            <label>技术支持<select name="userId" id="grant-user"></select></label>
+            <label>商户<select name="tenantId" id="grant-tenant"></select></label>
+            <label>操作<select name="enabled"><option value="true">授权</option><option value="false">撤销授权</option></select></label>
+            <button>保存授权</button>
+          </form><pre id="grant-list"></pre>
+        </div>
+        <div id="quota-controls" hidden>
+          <h3>商户调查配额</h3>
+          <p class="hint">额度由同一商户的所有成员共用。保存后对新请求生效，不清零已用次数；每日次数按北京时间早上 8 点重新计算。此设置不会增加模型服务商的额度。</p>
+          <form id="quota-form">
+            <label>商户<select id="quota-tenant" name="tenantId" required></select></label>
+            <label>每分钟受理次数（1～600）<input id="quota-rpm" name="requestsPerMinute" type="number" min="1" max="600" step="1" required /></label>
+            <label>每日受理次数（1～10000）<input id="quota-daily" name="dailyRuns" type="number" min="1" max="10000" step="1" required /></label>
+            <label>排队或执行中的任务上限（1～8）<input id="quota-active" name="activeRuns" type="number" min="1" max="8" step="1" required /></label>
+            <button id="save-quota" disabled>保存配额</button>
+          </form>
+          <p id="quota-feedback" role="status" aria-live="polite"></p>
+        </div>
+        <div id="operation-controls" hidden><h3>运行指标</h3><p>历史包含模拟与真实执行，不能据此判断真实模型效果。</p><pre id="operation-stats"></pre></div>
+        <button id="refresh-admin" class="secondary">刷新管理数据</button>
+      </section>
+      <main class="layout" id="investigation-layout">
+        <aside class="card">
+          <div id="session-tools">
+            <h2>发起调查</h2>
+            <label>业务账户<select id="account"></select></label>
+            <label
+              >环境<select id="environment">
+                <option value="production">生产环境</option>
+                <option value="sandbox">沙箱环境</option>
+              </select></label
+            ><button id="create-session">新建调查</button>
+          </div>
+          <h2 id="list-title">调查记录</h2>
+          <div id="list"></div>
+        </aside>
+        <section class="card content">
+          <div id="empty">选择一条记录，或新建调查。</div>
+          <section id="session-detail" hidden>
+            <div class="heading">
+              <h2 id="session-title"></h2>
+              <span id="session-status" class="badge"></span>
+            </div>
+            <p id="scope" class="hint"></p>
+            <div id="messages" class="messages"></div>
+            <form id="message-form">
+              <label
+                >问题或补充信息<textarea
+                  id="message"
+                  maxlength="20000"
+                  required
+                  placeholder="支付 pay_bg_001_0003 已成功，但没有收到通知……"
+                ></textarea>
+              </label>
+              <div class="actions">
+                <button id="send">发送问题</button
+                ><button id="cancel" type="button" class="secondary">停止本轮</button>
+              </div>
+            </form>
+            <div class="actions">
+              <button id="create-ticket" class="secondary">转为技术工单</button
+              ><button id="export" class="secondary">查看调查记录</button>
+            </div>
+            <pre id="events" hidden></pre>
+          </section>
+          <section id="ticket-detail" hidden>
+            <div class="heading">
+              <h2 id="ticket-title"></h2>
+              <span id="ticket-status" class="badge"></span>
+            </div>
+            <p id="ticket-meta" class="hint"></p>
+            <h3>处理记录</h3>
+            <div id="history"></div>
+            <h3>调查证据</h3>
+            <pre id="evidence"></pre>
+            <label
+              >处理说明<textarea
+                id="note"
+                maxlength="2000"
+                placeholder="说明本次处理结果或下一步"
+              ></textarea>
+            </label>
+            <div id="transitions" class="actions"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+    <div id="error" role="alert" hidden></div>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

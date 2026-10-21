@@ -173,8 +173,6 @@ class SessionManager:
             if not can_resume:
                 raise Conflict("Only interrupted, canceled or failed runs can be continued")
             return session["runs"][-1]["input"]
-        if can_resume:
-            raise Conflict("Continue the interrupted turn or create a new session")
         if content is None:
             raise ValueError("Run input is missing")
         return content

@@ -146,6 +146,12 @@ class VectorStore(Protocol):
         """在指定集合内用查询向量排序并过滤元数据，返回最多 limit 条带来源的候选。"""
         ...
 
+    def list_passages(
+        self, collection_id: str, filters: JsonObject | None = None
+    ) -> list[Passage]:
+        """返回指定集合内符合 metadata 条件的所有片段，供小型本地语料词法召回。"""
+        ...
+
     def read_document(self, collection_id: str, doc_id: str) -> list[Passage]:
         """按文档编号返回它的全部分块，按块号排序；文档不存在时返回空列表。"""
         ...

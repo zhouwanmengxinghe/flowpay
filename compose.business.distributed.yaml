@@ -1,0 +1,77 @@
+services:
+  support-api-a:
+    build:
+      context: .
+      dockerfile: infra/business/Dockerfile
+    cpus: 0.5
+    mem_limit: 384m
+    environment: &api_environment
+      SUPPORT_DB_URL: jdbc:postgresql://support-db:5432/support
+      SUPPORT_REDIS_HOST: support-redis
+      SUPPORT_REDIS_PORT: 6379
+      SUPPORT_BIND: 0.0.0.0
+      SUPPORT_DB_PASSWORD: ${SUPPORT_DB_PASSWORD:?Set SUPPORT_DB_PASSWORD}
+      SUPPORT_AGENT_URL: http://support-agent:8010
+      SUPPORT_AGENT_KEY: ${SUPPORT_AGENT_KEY:?Set SUPPORT_AGENT_KEY}
+      SUPPORT_DEMO: "true"
+      SUPPORT_DEMO_PASSWORD: ${SUPPORT_DEMO_PASSWORD:?Set SUPPORT_DEMO_PASSWORD}
+      SUPPORT_ORIGIN: http://localhost:18080
+      SUPPORT_SCHEDULER_MODE: distributed
+      SUPPORT_INSTANCE_NAME: api-a
+      SUPPORT_WORKERS: 2
+      SUPPORT_RUN_LEASE_SECONDS: 30
+      SUPPORT_HEARTBEAT_SECONDS: 5
+      SUPPORT_RUN_DEADLINE_SECONDS: 180
+      SUPPORT_DISPATCH_NOTIFICATIONS: "true"
+      SUPPORT_SCAN_DELAY_MS: 5000
+      SUPPORT_RABBIT_HOST: support-rabbit
+      SUPPORT_RABBIT_PORT: 5672
+      SUPPORT_RABBIT_USER: ${SUPPORT_RABBIT_USER:-support}
+      SUPPORT_RABBIT_PASSWORD: ${SUPPORT_RABBIT_PASSWORD:?Set SUPPORT_RABBIT_PASSWORD}
+    depends_on:
+      support-db: {condition: service_healthy}
+      support-redis: {condition: service_healthy}
+      support-agent: {condition: service_healthy}
+      support-rabbit: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 45
+      start_period: 10s
+  support-api-b:
+    build:
+      context: .
+      dockerfile: infra/business/Dockerfile
+    cpus: 0.5
+    mem_limit: 384m
+    environment:
+      <<: *api_environment
+      SUPPORT_INSTANCE_NAME: api-b
+    depends_on:
+      support-db: {condition: service_healthy}
+      support-redis: {condition: service_healthy}
+      support-agent: {condition: service_healthy}
+      support-rabbit: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 45
+      start_period: 10s
+  support-gateway:
+    image: nginx:1.30.6-alpine@sha256:970364228b1e4f932abc22d321932816782cca8a20b85a77552a7cfe9acfb3b5
+    cpus: 0.25
+    mem_limit: 64m
+    volumes:
+      - ./infra/business/nginx-distributed.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "127.0.0.1:18080:8080"
+    depends_on:
+      support-api-a: {condition: service_healthy}
+      support-api-b: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/api/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 15

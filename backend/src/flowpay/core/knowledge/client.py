@@ -2,24 +2,42 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Literal
 
 from flowpay.core.event_log.contracts import EventSink
 from flowpay.core.event_log.store import new_id
 from flowpay.core.json import JsonObject, require_object, to_json_object
 from flowpay.core.llm.embedding import EmbeddingClient
+from flowpay.core.llm.embedding.ollama import retrieval_question
 from flowpay.core.llm.embedding.settings import same_vector_space
 
 from .contracts import Passage, VectorStore
+from .document_ranking import DOCUMENT_HYBRID_CONFIG, rank_documents
+from .ranking import (
+    deduplicate_mmr,
+    lexical_order,
+    reciprocal_rank_fusion,
+    rerank_bm25,
+)
+
+RetrievalMode = Literal["dense", "hybrid", "hybrid-document", "hybrid-rerank", "hybrid-rerank-mmr"]
 
 
 class KnowledgeClient:
-    """提供有日志的知识构建与检索能力，不决定业务查询策略。"""
+    """负责知识构建、检索日志和可配置的 dense/hybrid 排序流程。"""
 
-    def __init__(self, store: VectorStore, embeddings: EmbeddingClient, tracer: EventSink):
+    def __init__(
+        self,
+        store: VectorStore,
+        embeddings: EmbeddingClient,
+        tracer: EventSink,
+        retrieval_mode: RetrievalMode = "hybrid",
+    ):
         """接收向量存储、嵌入客户端与本轮追踪；存储连接的生命周期由调用方负责。"""
         self.store: VectorStore = store
         self.embeddings: EmbeddingClient = embeddings
         self.tracer: EventSink = tracer
+        self.retrieval_mode: RetrievalMode = retrieval_mode
 
     # 已成功入库的批次不会重算；外部请求成功但入库失败的批次重试时可能再次请求。
     async def embed_pending(self, collection_id: str) -> int:
@@ -72,6 +90,7 @@ class KnowledgeClient:
                 "query": text,
                 "limit": limit,
                 "filters": filters or {},
+                "retrieval_mode": self.retrieval_mode,
             },
             call_id,
         )
@@ -90,15 +109,46 @@ class KnowledgeClient:
             # 查询文本和文档分块必须处于同一向量空间；前面已核对完整模型身份。
             # 这里不会自动改写问题或拼接业务提示，那些策略由 workflows 决定。
             batch = await self.embeddings.embed([text])
-            result = await asyncio.to_thread(
-                self.store.search, collection_id, batch, limit, filters
+            candidate_limit = min(100, max(limit, 50)) if self.retrieval_mode != "dense" else limit
+            dense = await asyncio.to_thread(
+                self.store.search, collection_id, batch, candidate_limit, filters
             )
+            if self.retrieval_mode != "dense":
+                corpus = await asyncio.to_thread(self.store.list_passages, collection_id, filters)
+                lexical_text = retrieval_question(text)
+                lexical = await asyncio.to_thread(lexical_order, lexical_text, corpus)
+                if self.retrieval_mode == "hybrid-document":
+                    fused = await asyncio.to_thread(
+                        rank_documents,
+                        lexical_text,
+                        dense,
+                        lexical,
+                        DOCUMENT_HYBRID_CONFIG,
+                        limit=limit,
+                    )
+                else:
+                    fused = await asyncio.to_thread(
+                        reciprocal_rank_fusion,
+                        [dense, lexical[:candidate_limit]],
+                        candidate_limit=candidate_limit,
+                    )
+                if self.retrieval_mode in {"hybrid-rerank", "hybrid-rerank-mmr"}:
+                    fused = await asyncio.to_thread(rerank_bm25, lexical_text, fused)
+                if self.retrieval_mode == "hybrid-rerank-mmr":
+                    result = await asyncio.to_thread(
+                        deduplicate_mmr, lexical_text, fused, limit=limit
+                    )
+                else:
+                    result = fused[:limit]
+            else:
+                result = dense
             # 事件载荷保留完整溯源；只有交给模型的那一份会被投影成四个字段。
             await self.tracer.emit(
                 "knowledge.response",
                 {
                     "collection_id": collection_id,
                     "results": [to_json_object(passage) for passage in result],
+                    "retrieval_mode": self.retrieval_mode,
                 },
                 call_id,
             )

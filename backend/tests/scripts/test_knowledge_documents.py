@@ -47,6 +47,32 @@ def test_chunks_preserve_source_locations_and_ignore_code_headings() -> None:
     )
 
 
+def test_structure_splitter_overlaps_and_prefers_paragraph_boundaries() -> None:
+    from flowpay.core.knowledge.models import SplitterConfig
+
+    text = document_text().replace("重复说明。" * 120, ("第一段内容。\n\n第二段内容。\n\n" * 45))
+    document, start = parse_document("knowledge/rules.md", text)
+    config = SplitterConfig(
+        max_chunk_chars=220,
+        name="markdown-structure-character-v2",
+        overlap_chars=30,
+    )
+    chunks = split_document(document, start, config)
+    assert len(chunks) > 1
+    locators = [chunk.source_locator for chunk in chunks]
+    assert all(
+        int(left["end_char"]) > int(right["start_char"])
+        for left, right in zip(locators, locators[1:], strict=False)
+    )
+    assert all(len(chunk.content) <= config.max_chunk_chars for chunk in chunks)
+    assert all(
+        chunk.content
+        == locators[index]["prefix"]
+        + document.content[int(locators[index]["start_char"]) : int(locators[index]["end_char"])]
+        for index, chunk in enumerate(chunks)
+    )
+
+
 def test_non_indexable_and_empty_documents_fail_before_embedding(tmp_path: Path) -> None:
     config = write_release(
         tmp_path, {"knowledge/rules.md": document_text().replace("include", "exclude")}
@@ -137,7 +163,10 @@ def test_source_symlink_cannot_escape_dataset(tmp_path: Path) -> None:
     root.mkdir()
     external = tmp_path / "secret.md"
     external.write_text("outside")
-    (root / "link.md").symlink_to(external)
+    try:
+        (root / "link.md").symlink_to(external)
+    except OSError as error:
+        pytest.skip(f"The current Windows account cannot create symlinks: {error}")
     with pytest.raises(ValueError, match="escapes dataset root"):
         checked_bytes(root, "link.md", hashlib.sha256(b"outside").hexdigest())
 

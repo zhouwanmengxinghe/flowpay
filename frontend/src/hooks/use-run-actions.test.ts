@@ -13,6 +13,24 @@ const options = () => ({
 })
 afterEach(() => vi.restoreAllMocks())
 
+it.each(['failed', 'interrupted', 'canceled'])('allows a new message after %s', async (status) => {
+  const submit = vi.spyOn(sessionApi, 'submitMessage').mockResolvedValue({})
+  const { result } = renderHook(() => useRunActions({ ...options(), status }))
+  await act(async () => {
+    expect(await result.current.submitMessage('新的问题')).toBe(true)
+  })
+  expect(submit).toHaveBeenCalledWith('session_1', expect.any(String), '新的问题')
+})
+
+it('still rejects new messages while a run is active', async () => {
+  const submit = vi.spyOn(sessionApi, 'submitMessage').mockResolvedValue({})
+  const { result } = renderHook(() => useRunActions({ ...options(), status: 'running' }))
+  await act(async () => {
+    expect(await result.current.submitMessage('新的问题')).toBe(false)
+  })
+  expect(submit).not.toHaveBeenCalled()
+})
+
 it('reuses the original request ID after a lost submit response', async () => {
   const submit = vi
     .spyOn(sessionApi, 'submitMessage')

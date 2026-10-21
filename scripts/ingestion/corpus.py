@@ -51,6 +51,8 @@ class CorpusSettings:
     release_manifest: str
     release_manifest_sha256: str
     max_chunk_chars: int = 1000
+    overlap_chars: int = 0
+    boundary_aware: bool = False
 
     @classmethod
     def load(cls, path: Path) -> CorpusSettings:
@@ -151,13 +153,36 @@ def prepare_corpus(
         seen_ids.add(document.doc_id)
         source_hashes[relative] = artifact.sha256
         documents.append(
-            (document, split_document(document, body_start, config.max_chunk_chars))
+            (
+                document,
+                split_document(
+                    document,
+                    body_start,
+                    SplitterConfig(
+                        max_chunk_chars=config.max_chunk_chars,
+                        name=(
+                            "markdown-structure-character-v2"
+                            if config.boundary_aware or config.overlap_chars
+                            else "markdown-heading-character-v1"
+                        ),
+                        overlap_chars=config.overlap_chars,
+                    ),
+                ),
+            )
         )
     build_config = KnowledgeBuildConfig(
         release_manifest=config.release_manifest,
         release_manifest_sha256=config.release_manifest_sha256,
         document_sources=source_hashes,
-        splitter=SplitterConfig(max_chunk_chars=config.max_chunk_chars),
+        splitter=SplitterConfig(
+            max_chunk_chars=config.max_chunk_chars,
+            name=(
+                "markdown-structure-character-v2"
+                if config.boundary_aware or config.overlap_chars
+                else "markdown-heading-character-v1"
+            ),
+            overlap_chars=config.overlap_chars,
+        ),
         embedding=embedding.identity(),
         query_instruction=QUERY_INSTRUCTION,
     )

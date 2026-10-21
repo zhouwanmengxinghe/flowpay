@@ -12,6 +12,7 @@ dist/
 var/
 *.egg-info/
 *.tsbuildinfo
+target/
 
 # 模拟器生成的业务快照，由 dataset 工程重新构建，不进版本库
 dataset/data/generated/

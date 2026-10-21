@@ -5,14 +5,15 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import Callable
-from typing import Protocol
+from typing import Protocol, cast
 
 from flowpay.core.agent.trace import Tracer
 from flowpay.core.config import Settings
 from flowpay.core.data_sources import DataSources, SourceClient
-from flowpay.core.json import JsonObject
-from flowpay.core.knowledge.client import KnowledgeClient
+from flowpay.core.json import JsonObject, to_json_object
+from flowpay.core.knowledge.client import KnowledgeClient, RetrievalMode
 from flowpay.core.knowledge.contracts import Collection, DocumentRetriever, VectorStore
+from flowpay.core.knowledge.document_ranking import DOCUMENT_HYBRID_CONFIG
 from flowpay.core.llm.embedding import EmbeddingClient
 from flowpay.core.llm.embedding.openai_embedding import OpenAiEmbeddingModel
 
@@ -65,7 +66,14 @@ class RuntimeResources:
         if self.vectors is None or self.settings.embedding is None:
             return None
         embeddings = EmbeddingClient(OpenAiEmbeddingModel(self.settings.embedding), tracer)
-        return KnowledgeClient(self.vectors, embeddings, tracer)
+        mode_value = os.environ.get("FLOWPAY_RETRIEVAL_MODE", "hybrid-document").strip().lower()
+        mode_options = {"dense", "hybrid", "hybrid-document", "hybrid-rerank", "hybrid-rerank-mmr"}
+        if mode_value not in mode_options:
+            raise ValueError(
+                f"FLOWPAY_RETRIEVAL_MODE must be one of {', '.join(sorted(mode_options))}"
+            )
+        mode = cast(RetrievalMode, mode_value)
+        return KnowledgeClient(self.vectors, embeddings, tracer, mode)
 
     @classmethod
     def from_settings(cls, settings: Settings) -> RuntimeResources:
@@ -114,6 +122,11 @@ class RuntimeResources:
                     "dimensions",
                 )
             }
+            snapshot["knowledge"]["retrieval_mode"] = (
+                os.environ.get("FLOWPAY_RETRIEVAL_MODE", "hybrid-document").strip().lower()
+            )
+            if snapshot["knowledge"]["retrieval_mode"] == "hybrid-document":
+                snapshot["knowledge"]["document_ranking"] = to_json_object(DOCUMENT_HYBRID_CONFIG)
         return snapshot
 
     async def snapshot(self, previous: JsonObject | None = None) -> JsonObject:

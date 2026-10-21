@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from typing import Literal, cast
+from urllib.parse import urlsplit
 
 import httpx
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI
@@ -77,10 +78,15 @@ class OpenAiChatModel:
         if not key:
             raise ValueError(f"Missing environment variable: {self.settings.api_key_env}")
         accumulator = ChatStreamAccumulator()
+        # HKU 网关使用订阅密钥头；仅向指定主机发送，避免影响其他兼容服务。
+        headers: dict[str, str] = {}
+        if urlsplit(self.settings.base_url).hostname == "api.hku.hk":
+            headers["api-key"] = key
         # SDK 负责认证、请求和 HTTP 错误；禁用内部重试，避免一次记录隐藏多次请求。
         async with AsyncOpenAI(
             api_key=key,
             base_url=self.settings.base_url,
+            default_headers=headers,
             timeout=self.settings.timeout_seconds,
             max_retries=0,
             http_client=httpx.AsyncClient(transport=self.transport),

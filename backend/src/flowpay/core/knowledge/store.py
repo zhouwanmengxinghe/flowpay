@@ -319,6 +319,23 @@ class PostgresVectorStore:
             ).fetchall()
             return [_passage(row, score=0.0) for row in rows]
 
+    def list_passages(self, collection_id: str, filters: JsonObject | None = None) -> list[Passage]:
+        """列出集合片段供应用层 BM25 扫描；metadata 过滤仍在数据库执行。"""
+        if filters is not None:
+            require_object(filters)
+        with self.pool.connection() as db:
+            collection = self._read_collection(db, collection_id)
+            if collection["status"] != "ready":
+                raise ValueError("Collection is not ready")
+            rows = db.execute(
+                "SELECT c.collection_id,c.doc_id,c.chunk_no,c.content,c.source_locator,"
+                + "d.title,d.source_path,d.source_sha256,d.metadata FROM chunks c "
+                + "JOIN documents d USING(collection_id,doc_id) WHERE c.collection_id=%s "
+                + "AND d.metadata @> %s::jsonb ORDER BY c.doc_id,c.chunk_no",
+                (collection_id, Jsonb(filters or {})),
+            ).fetchall()
+            return [_passage(row, score=0.0) for row in rows]
+
     # 引用必须携带集合上下文；相同文档编号在不同集合中可能对应不同版本。
     def read_passage(self, collection_id: str, doc_id: str, chunk_no: int) -> PassageLookup:
         """读取集合、文档、块号所指向的片段及其所属文档全文。

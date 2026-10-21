@@ -20,7 +20,7 @@ SETUP_ARGS ?=
 # Python 不自动读 .env。这里在同一条 shell 里加载它，再派生两类变量：
 # 数据集路径，以及三个角色的连接串。口令固定，与 compose.yaml 里那份同一个默认值；
 # 容器那份走 postgres:5432，这里是宿主机那份，走发布出来的端口。
-DB_HOST := 127.0.0.1:55432/flowpay_knowledge
+DB_HOST := 127.0.0.1:15432/flowpay_knowledge
 define with-env
 	set -a; [ -f .env ] && . ./.env; \
 	[ -n "$$FLOWPAY_DATASET_ROOT" ] && FLOWPAY_DATASET_PATH="$$FLOWPAY_DATASET_ROOT/data"; \

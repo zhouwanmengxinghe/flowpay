@@ -1,5 +1,9 @@
 # FlowPay Agentic RAG 教学项目
 
+基于 [KamaAgenticRAG](https://github.com/youngyangyang04/KamaAgenticRAG) 进行业务化扩展，保留原 s1—s4 教学实现，并新增 Java 多租户业务后台、持久任务协调、Redis/RabbitMQ 集成与 RAG 检索优化。原项目版权及 MIT 许可见 [LICENSE](#upstream-license)；完整项目说明和量化实验索引见[项目总览](docs/FLOWPAY_RESUME_PROJECT_DOSSIER.md)。
+
+新增 Java 业务升级入口：见 [商户支持后台说明](business/README.md)。包含独立 PostgreSQL、Redis 限流、成员权限、持久任务、工单和 LangChain 调查；缓存、双 Java 实例、租约恢复和 RabbitMQ outbox 的实测结果见[分布式升级总结](docs/verification/distributed/SUMMARY.md)。业务启动器默认真实模式，自动验收显式使用 mock 且未调用模型。原教学入口继续使用本文流程。
+
 围绕一家虚构支付公司 FlowPay 的客服场景，分阶段（s1—s4）手写 Agentic RAG：
 从一次检索一次回答，到模型自己决定检索几轮、用哪个工具。
 
@@ -43,6 +47,16 @@ make up                  # 首次视网络而定，主要花在拉 4.5 GB 的 ol
 
 模型存在 `flowpay_ollama` 这个 docker 卷里，`make down` 不会删，所以只下载一次。
 
+会话事件库保存在 `flowpay_runtime` 数据卷中，避免在 Windows 挂载目录上逐片同步写入
+造成流式回答延迟。普通 `docker compose down` 保留此卷；`down -v` 会删除会话、知识库和模型。
+从旧版 `var/live` 切换时，先停止后端，再用 SQLite backup 迁移（保留原库，不覆盖已有目标）：
+
+```bash
+docker compose stop backend
+docker compose run --rm --no-deps -T backend python scripts/migrate_runtime.py /app/var/live/sessions.sqlite /app/runtime/sessions.sqlite
+docker compose up -d --no-deps --force-recreate backend
+```
+
 ## 为什么必须有嵌入服务
 
 数据包省掉的是**建库**：100 篇文档切成 712 块，每块的向量都算好了。
@@ -60,6 +74,12 @@ dimensions / request_options），对不上直接报错，不会让检索悄悄�
 `ollama` 会被归一成同一个部署）。
 
 ## 常用命令
+
+Docker 默认关闭后端自动重载与前端文件轮询，避免 Windows 文件共享进程持续高 CPU。
+后端、前端、Ollama 分别限制为 2、1、4 个逻辑 CPU 的计算配额，给桌面保留资源。
+嵌入高负载时可能需要更长时间，但不会允许该容器独占全部 CPU。
+修改源码后执行 `docker compose restart backend frontend` 加载；需要前端轮询开发时，
+可显式设置 `FLOWPAY_POLL_WATCH=1` 后重新创建前端容器。
 
 ```
 make up        起全栈（BUILD=1 强制重建镜像）
@@ -104,11 +124,11 @@ make frontend                            # 前端
 请使用数据包配套的模型版本，不要改 `revision` 绕过检查。
 
 **端口被占**  
-需要 5173、8000、55432 三个端口。Ollama 的 11434 不对外发布，
+需要 5173、8000、15432 三个端口。Ollama 的 11434 不对外发布，
 不会和你本机已装的 Ollama 冲突。
 
 **想从头再来**  
-`docker compose down -v` 删掉数据卷（知识库和嵌入模型都会没，下次 `make up` 重新准备）。
+`docker compose down -v` 删掉数据卷（会话历史、知识库和嵌入模型都会删除，下次启动需重新准备）。
 
 ## 上游代码许可声明
 

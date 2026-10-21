@@ -1,0 +1,53 @@
+server:
+  port: ${SUPPORT_PORT:8080}
+  address: ${SUPPORT_BIND:127.0.0.1}
+  error:
+    include-message: never
+spring:
+  rabbitmq:
+    host: ${SUPPORT_RABBIT_HOST:127.0.0.1}
+    port: ${SUPPORT_RABBIT_PORT:5672}
+    username: ${SUPPORT_RABBIT_USER:support}
+    password: ${SUPPORT_RABBIT_PASSWORD:support-local-only}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 2
+  data:
+    redis:
+      host: ${SUPPORT_REDIS_HOST:127.0.0.1}
+      port: ${SUPPORT_REDIS_PORT:16379}
+      connect-timeout: 500ms
+      timeout: 500ms
+  datasource:
+    url: ${SUPPORT_DB_URL:jdbc:postgresql://127.0.0.1:15433/support}
+    username: ${SUPPORT_DB_USER:support}
+    password: ${SUPPORT_DB_PASSWORD:support-local-only}
+    hikari:
+      maximum-pool-size: 8
+      connection-timeout: 5000
+  flyway:
+    enabled: true
+support:
+  agent-url: ${SUPPORT_AGENT_URL:http://127.0.0.1:8010}
+  agent-key: ${SUPPORT_AGENT_KEY:}
+  demo: ${SUPPORT_DEMO:false}
+  demo-password: ${SUPPORT_DEMO_PASSWORD:}
+  origin: ${SUPPORT_ORIGIN:http://localhost:8080}
+  secure-cookie: ${SUPPORT_SECURE_COOKIE:false}
+  workers: ${SUPPORT_WORKERS:2}
+  queue-capacity: ${SUPPORT_QUEUE_CAPACITY:16}
+  scheduler-mode: ${SUPPORT_SCHEDULER_MODE:single}
+  instance-name: ${SUPPORT_INSTANCE_NAME:local}
+  run-lease-seconds: ${SUPPORT_RUN_LEASE_SECONDS:30}
+  heartbeat-seconds: ${SUPPORT_HEARTBEAT_SECONDS:5}
+  run-deadline-seconds: ${SUPPORT_RUN_DEADLINE_SECONDS:180}
+  dispatch-notifications: ${SUPPORT_DISPATCH_NOTIFICATIONS:false}
+  scan-delay-ms: ${SUPPORT_SCAN_DELAY_MS:500}
+management:
+  endpoints:
+    web:
+      exposure:
+        exclude: '*'
