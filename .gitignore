@@ -19,3 +19,8 @@ dataset/data/generated/
 
 # 数据集不随仓库分发：解包 flowpay-dataset-v1.tar.gz 后用 FLOWPAY_DATASET_ROOT 指向它。
 /dataset/
+
+# 本地学习资料与实验记录，不随程序代码发布
+/docs/
+/AGENTS.md
+/business/README.md

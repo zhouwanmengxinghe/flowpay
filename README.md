@@ -4,6 +4,8 @@
 
 支持先运行不需要模型密钥的模拟演示，再接入真实模型和知识库。以下日常部署流程以 **Windows + PowerShell 7 + Docker Desktop（Linux 容器）**为准。
 
+**部署现状：** 已实现 Docker Compose 服务编排和启动脚本；首次运行仍需准备依赖、构建项目镜像与 Java 包，真实模式还需单独准备数据包和嵌入模型。完成初始化后可用一条启动命令运行工作台，目前不支持在全新机器上仅执行 `docker compose up` 就完成全部部署。
+
 ## 项目能力
 
 - **证据驱动调查**：LangChain Agent 结合知识检索、文档读取、受控 SQL 和日志工具，核对支付、事件与 Webhook 投递等模拟业务事实。
@@ -11,7 +13,6 @@
 - **可靠执行**：异步持久任务、幂等受理、执行批次、全局槽位、租约恢复、取消及迟到结果隔离。
 - **中间件治理**：Redis 检索缓存与热点重建、Lua 固定窗口限流；RabbitMQ 事务性 Outbox 和数据库轮询兜底。
 - **可复现 RAG 优化**：Dense + BM25 + RRF 混合召回、文档聚合排序、稳定证据标签及离线候选快照重放。
-- **保留教学入口**：原 s1—s4 手写 Agent 和 React 界面保留，便于对照学习。
 
 FlowPay 是模拟支付业务场景；本项目不执行真实收单、清结算或资金交易。
 
@@ -354,19 +355,16 @@ docker compose stop
 | 实验 | 结果 | 口径 |
 |---|---|---|
 | 文档聚合检索 | 文档级 Hit@5：66.07% → **83.93%** | 复用 56 题迭代，37 → 47 题；不是回答准确率 |
-| 精确证据小节检索 | 小节级 Hit@5：51.79% → **57.14%** | 与文档级指标分开统计 |
 | 真实检索缓存 | 嵌入调用 30 → 6，减少 **80%** | 6 条查询各重复 5 次 |
 | 真实热点并发 | 同键 20 并发，嵌入调用 **20 → 1** | 本地 Ollama/pgvector；耗时约 18.19 s → 3.06 s |
-| 分布式与 MQ 故障验证 | **10/10** 场景通过 | 真实中间件 + mock Agent，非生产 SLA |
-| 有限真实模型验收 | **5/5** 运行完成 | 11 次模型、14 次工具调用；不是普遍正确率 |
+| 分布式与 MQ 故障验证 | **10/10** 场景通过 | 真实中间件 + mock Agent |
+| 有限真实模型验收 | **5/5** 运行完成 | 11 次模型、14 次工具调用 |
 
-完整证据和限制见[项目测试报告](docs/verification/FLOWPAY_TEST_REPORT_2026-10-20.md)、[文档聚合实验](docs/verification/rag-quality/RAG_DOCUMENT_RANKING_2026-10-20.md)及[分布式验证总结](docs/verification/distributed/SUMMARY.md)。
-
-不调用聊天模型的离线检索重放：
+以上为本地实验结果；学习文档与历史实验记录不随代码仓库分发。可在完成真实模式的数据与服务初始化后，重新采集候选并离线重放检索实验；采集调用本地嵌入服务，两步都不调用聊天模型：
 
 ```powershell
-$env:PYTHONPATH='backend/src;.'
-uv run --project backend python scripts/business/experiment_document_ranking.py evaluate --snapshot docs/verification/rag-quality/document-candidates-2026-10-20.json.gz --output var/replay-document-ranking.json
+docker compose --env-file .env --env-file .env.support -f compose.business.yaml -f compose.business.real.yaml run --rm --no-deps -v "${PWD}/scripts:/app/scripts:ro" -v "${PWD}/var:/app/var" -e PYTHONPATH=/opt/business-deps:/app/backend/src:/app support-agent python scripts/business/experiment_document_ranking.py collect --snapshot /app/var/rag-document-candidates.json
+docker compose --env-file .env --env-file .env.support -f compose.business.yaml -f compose.business.real.yaml run --rm --no-deps -v "${PWD}/scripts:/app/scripts:ro" -v "${PWD}/var:/app/var" -e PYTHONPATH=/opt/business-deps:/app/backend/src:/app support-agent python scripts/business/experiment_document_ranking.py evaluate --snapshot /app/var/rag-document-candidates.json --output /app/var/replay-document-ranking.json
 ```
 
 双实例 + MQ 隔离演示，仍使用 mock：
@@ -396,28 +394,17 @@ uv run --project backend python scripts/business/upgrade_stack.py start
 
 **API 调用卡住或电脑负载高**：先查看 Agent、Ollama 的日志和资源限制。模型推理、问题向量化与 Java 接口读取是不同链路，不能用普通 GET 的吞吐代表真实 Agent 问答能力。
 
-## 目录与深入阅读
+## 代码目录
 
 ```text
 business/                    Java 业务后台、工作台、Flyway 迁移
 backend/src/flowpay/business/ Python 内部业务执行接口
 backend/src/flowpay/workflows/ LangChain 业务编排与原 s1—s4 教学阶段
 backend/src/flowpay/core/     检索、工具、数据源、缓存与执行基础能力
-frontend/                    原 React 教学界面
 infra/                       Dockerfile、PostgreSQL 初始化、Nginx
 scripts/business/            准备、启停、故障验证与评测脚本
-docs/                        设计、学习路线和实验报告
+
 ```
-
-- [项目总览、技术亮点与完整证据索引](docs/FLOWPAY_RESUME_PROJECT_DOSSIER.md)
-- [业务后台详细运行说明](business/README.md)
-- [后端学习路线](docs/BACKEND_LEARNING_PATH.md)
-- [分布式升级设计](docs/DISTRIBUTED_UPGRADE_PLAN.md)
-- [环境变量模板](.env.example)
-
-## 来源与许可
-
-基于 [KamaAgenticRAG](https://github.com/youngyangyang04/KamaAgenticRAG) 进行业务化扩展，保留原 s1—s4 教学实现。原项目版权及 MIT 许可见 [LICENSE](#upstream-license)。
 
 ## 上游代码许可声明
 
